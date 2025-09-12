@@ -1,2 +1,3 @@
 # Ignore the entire data folder
 /data/
+/notebooks/cache/
