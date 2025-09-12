@@ -135,8 +135,12 @@ Feature description: {feature_description}
         """
         try:
             # Create a safe execution environment
+            # Create a numpy namespace with additional functions
+            np_extended = np
+            np_extended.nan_to_num = np.nan_to_num
+            
             exec_globals = {
-                'np': np,
+                'np': np_extended,
                 'pd': pd,
                 'Tuple': Tuple,
                 'List': List,
@@ -164,6 +168,36 @@ Feature description: {feature_description}
                     'all': all,
                     'sorted': sorted,
                     'reversed': reversed,
+                    'isinstance': isinstance,
+                    'type': type,
+                    'hasattr': hasattr,
+                    'getattr': getattr,
+                    'setattr': setattr,
+                    'callable': callable,
+                    'issubclass': issubclass,
+                    'super': super,
+                    'open': open,
+                    'iter': iter,
+                    'next': next,
+                    'map': map,
+                    'filter': filter,
+                    'reduce': __import__('functools').reduce,
+                    'pow': pow,
+                    'divmod': divmod,
+                    'bin': bin,
+                    'hex': hex,
+                    'oct': oct,
+                    'ord': ord,
+                    'chr': chr,
+                    'bool': bool,
+                    'complex': complex,
+                    'bytes': bytes,
+                    'bytearray': bytearray,
+                    'memoryview': memoryview,
+                    'slice': slice,
+                    'property': property,
+                    'staticmethod': staticmethod,
+                    'classmethod': classmethod,
                 }
             }
             
@@ -178,6 +212,10 @@ Feature description: {feature_description}
                 
         except Exception as e:
             print(f"Error executing generated code: {e}")
+            print(f"Error type: {type(e).__name__}")
+            import traceback
+            print("Full traceback:")
+            traceback.print_exc()
             return None
 
     def fallback_construct_features(self, data: np.ndarray) -> np.ndarray:
@@ -495,8 +533,8 @@ def main():
     Main function to demonstrate the LLM-based feature selection system.
     """
     # Configuration
-    ANTHROPIC_API_KEY = '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'
-    stock = 'TSLA'
+    ANTHROPIC_API_KEY = 'your_anthropic_api_key_here'  # Replace with your actual API key
+    stock = 'PFE'
     DATA_PATH = f'cache/{stock}_raw_data_with_ohlc.pkl'
     OUTPUT_PATH = f'cache/{stock}_data_selected.pkl'
     
