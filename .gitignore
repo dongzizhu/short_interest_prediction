@@ -1,0 +1,3 @@
+
+# large local data
+data/prices/*.parquet
