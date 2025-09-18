@@ -533,7 +533,7 @@ def main():
     Main function to demonstrate the LLM-based feature selection system.
     """
     # Configuration
-    ANTHROPIC_API_KEY = 'your_anthropic_api_key_here'  # Replace with your actual API key
+    ANTHROPIC_API_KEY = ''  # Replace with your actual API key
     stock = 'PFE'
     DATA_PATH = f'cache/{stock}_raw_data_with_ohlc.pkl'
     OUTPUT_PATH = f'cache/{stock}_data_selected.pkl'
