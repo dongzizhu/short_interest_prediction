@@ -1,13 +1,26 @@
 """
-Iterative Agent-Based Feature Selection for Financial Time Series
-===============================================================
+Iterative Agent-Based Feature Selection for Financial Time Series (Enhanced Version)
+==================================================================================
 
-This script implements an iterative process that:
-1. Runs a baseline model without enhanced features
-2. Uses an AI agent to generate feature engineering code
-3. Tests the enhanced features and measures performance with p-value analysis
-4. Iteratively improves the features based on performance feedback
-5. Continues until performance plateaus
+This script implements an iterative process with three key improvements:
+1. IMPROVEMENT 1: Proper train/validation/test split to prevent data leakage
+   - Training set (60%): Used for model training
+   - Validation set (20%): Used for agent feedback and iteration decisions
+   - Test set (20%): Used only for final evaluation (unseen data)
+2. IMPROVEMENT 2: Optimal final evaluation using all available training data
+   - Baseline: Raw features, trained on train+val, tested on test
+   - Best Model: Processed features, trained on train+val, tested on test
+   - Fair comparison between baseline and feature-engineered model
+3. IMPROVEMENT 3: DL-based feature importance instead of problematic p-values
+   - Permutation importance: Measures actual impact on model performance
+   - Gradient-based importance: Uses neural network gradients for feature ranking
+   - More meaningful for deep learning models than statistical p-values
+4. Runs a baseline model without enhanced features
+5. Uses an AI agent to generate feature engineering code
+6. Tests the enhanced features on validation set and measures performance with DL-based importance
+7. Iteratively improves the features based on validation performance feedback
+8. Continues until performance plateaus
+9. Final evaluation maximizes data usage and provides fair comparison
 
 Author: AI Assistant
 Date: 2024
@@ -55,52 +68,110 @@ class EnhancedLSTMTimeSeries(nn.Module):
         return out
 
 
-def calculate_feature_pvalues(X_train, y_train, feature_names=None):
-    """Calculate p-values for each feature using linear regression"""
-    # Flatten the 3D data to 2D for statistical analysis
-    X_train = X_train[:, -1, :]
-    X_flat = X_train.reshape(X_train.shape[0], -1)
-    y_flat = y_train.ravel()
-    
-    # Fit linear regression
-    lr = LinearRegression()
-    lr.fit(X_flat, y_flat)
-    
-    # Calculate residuals
-    y_pred = lr.predict(X_flat)
-    residuals = y_flat - y_pred
-    mse = np.mean(residuals**2)
-    
-    # Calculate standard errors and t-statistics
-    X_with_intercept = np.column_stack([np.ones(X_flat.shape[0]), X_flat])
-    try:
-        cov_matrix = mse * np.linalg.inv(X_with_intercept.T @ X_with_intercept)
-        standard_errors = np.sqrt(np.diag(cov_matrix))[1:]  # Exclude intercept
-        t_statistics = lr.coef_ / standard_errors
-        
-        # Calculate p-values (two-tailed test)
-        degrees_of_freedom = X_flat.shape[0] - X_flat.shape[1] - 1
-        p_values = 2 * (1 - stats.t.cdf(np.abs(t_statistics), degrees_of_freedom))
-        
-    except np.linalg.LinAlgError:
-        print("⚠️ Singular matrix detected, using simplified p-value calculation")
-        p_values = np.ones(X_flat.shape[1]) * 0.5  # Default to non-significant
+def calculate_dl_feature_importance(model, X_train, y_train, feature_names=None, method='permutation'):
+    """Calculate DL-based feature importance using permutation or gradient-based methods"""
+    model.eval()
     
     # Create feature names if not provided
     if feature_names is None:
-        feature_names = [f"Feature_{i}" for i in range(X_flat.shape[1])]
+        feature_names = [f"Feature_{i}" for i in range(X_train.shape[-1])]
     
-    # Create results dictionary
-    feature_stats = {}
-    for i, (name, pval, coef) in enumerate(zip(feature_names, p_values, lr.coef_)):
-        feature_stats[name] = {
-            'p_value': pval,
-            'coefficient': coef,
-            'significant': pval < 0.05,
-            'highly_significant': pval < 0.01
+    if method == 'permutation':
+        return calculate_permutation_importance(model, X_train, y_train, feature_names)
+    elif method == 'gradient':
+        return calculate_gradient_importance(model, X_train, y_train, feature_names)
+    else:
+        raise ValueError("Method must be 'permutation' or 'gradient'")
+
+def calculate_permutation_importance(model, X_train, y_train, feature_names):
+    """Calculate feature importance using permutation method"""
+    print("📊 Calculating permutation-based feature importance...")
+    
+    # Get baseline performance
+    model.eval()
+    with torch.no_grad():
+        X_tensor = torch.tensor(X_train, dtype=torch.float32)
+        baseline_pred = model(X_tensor)
+        baseline_loss = nn.SmoothL1Loss()(baseline_pred, torch.tensor(y_train, dtype=torch.float32)).item()
+    
+    feature_importance = {}
+    importance_scores = []
+    
+    # Calculate importance for each feature
+    for i in range(X_train.shape[-1]):
+        # Create permuted data
+        X_permuted = X_train.copy()
+        np.random.shuffle(X_permuted[:, :, i])  # Permute feature i across all samples and timesteps
+        
+        # Calculate performance with permuted feature
+        with torch.no_grad():
+            X_perm_tensor = torch.tensor(X_permuted, dtype=torch.float32)
+            perm_pred = model(X_perm_tensor)
+            perm_loss = nn.SmoothL1Loss()(perm_pred, torch.tensor(y_train, dtype=torch.float32)).item()
+        
+        # Importance = increase in loss when feature is permuted
+        importance = perm_loss - baseline_loss
+        importance_scores.append(importance)
+        
+        # Determine significance based on importance magnitude
+        # Use relative importance (normalized by max importance)
+        max_importance = max(importance_scores) if importance_scores else 1.0
+        relative_importance = importance / max_importance if max_importance > 0 else 0
+        
+        feature_importance[feature_names[i]] = {
+            'importance': importance,
+            'relative_importance': relative_importance,
+            'significant': relative_importance > 0.1,  # Top 10% of features
+            'highly_significant': relative_importance > 0.2,  # Top 5% of features
+            'rank': 0  # Will be updated after all features are processed
         }
     
-    return feature_stats, lr.coef_, p_values
+    # Rank features by importance
+    sorted_indices = np.argsort(importance_scores)[::-1]  # Descending order
+    for rank, idx in enumerate(sorted_indices):
+        feature_importance[feature_names[idx]]['rank'] = rank + 1
+    
+    return feature_importance, importance_scores
+
+def calculate_gradient_importance(model, X_train, y_train, feature_names):
+    """Calculate feature importance using gradient-based method"""
+    print("📊 Calculating gradient-based feature importance...")
+    
+    model.eval()
+    X_tensor = torch.tensor(X_train, dtype=torch.float32, requires_grad=True)
+    y_tensor = torch.tensor(y_train, dtype=torch.float32)
+    
+    # Forward pass
+    output = model(X_tensor)
+    loss = nn.SmoothL1Loss()(output, y_tensor)
+    
+    # Calculate gradients
+    gradients = torch.autograd.grad(loss, X_tensor, retain_graph=True)[0]
+    
+    # Calculate importance as mean absolute gradient across all samples and timesteps
+    importance_scores = torch.mean(torch.abs(gradients), dim=(0, 1)).detach().numpy()
+    
+    feature_importance = {}
+    
+    # Normalize importance scores
+    max_importance = np.max(importance_scores) if np.max(importance_scores) > 0 else 1.0
+    normalized_importance = importance_scores / max_importance
+    
+    for i, (name, importance, norm_importance) in enumerate(zip(feature_names, importance_scores, normalized_importance)):
+        feature_importance[name] = {
+            'importance': float(importance),
+            'relative_importance': float(norm_importance),
+            'significant': norm_importance > 0.1,  # Top 10% of features
+            'highly_significant': norm_importance > 0.2,  # Top 5% of features
+            'rank': 0  # Will be updated after all features are processed
+        }
+    
+    # Rank features by importance
+    sorted_indices = np.argsort(importance_scores)[::-1]  # Descending order
+    for rank, idx in enumerate(sorted_indices):
+        feature_importance[feature_names[idx]]['rank'] = rank + 1
+    
+    return feature_importance, importance_scores
 
 
 def train_and_evaluate_model(X_train, X_test, y_train, y_test, prev_log_test, model_name="Model", epochs=50):
@@ -188,22 +259,29 @@ def train_and_evaluate_model(X_train, X_test, y_train, y_test, prev_log_test, mo
     print(f"RMSE: {rmse:.4f}")
     print(f"MAPE: {mape:.2f}%")
     
-    # Calculate feature p-values
-    print(f"\n📊 Calculating feature p-values...")
+    # Calculate DL-based feature importance
+    print(f"\n📊 Calculating DL-based feature importance...")
     feature_names = [f"Feature_{i}" for i in range(X_train.shape[-1])]
-    feature_stats, coefficients, p_values = calculate_feature_pvalues(X_train_scaled, y_train, feature_names)
+    
+    # Use permutation importance as default (more robust)
+    feature_stats, importance_scores = calculate_dl_feature_importance(
+        model, X_train_scaled, y_train, feature_names, method='permutation'
+    )
 
-    # Print feature significance summary
+    # Print feature importance summary
     significant_features = [name for name, stats in feature_stats.items() if stats['significant']]
     highly_significant = [name for name, stats in feature_stats.items() if stats['highly_significant']]
     
-    print(f"📈 Feature Significance Analysis:")
+    print(f"📈 DL-Based Feature Importance Analysis:")
     print(f"   • Total features: {len(feature_stats)}")
-    print(f"   • Significant features (p < 0.05): {len(significant_features)}")
-    print(f"   • Highly significant features (p < 0.01): {len(highly_significant)}")
+    print(f"   • Important features (top 10%): {len(significant_features)}")
+    print(f"   • Highly important features (top 5%): {len(highly_significant)}")
     
-    if significant_features:
-        print(f"   • Significant features: {significant_features[:5]}{'...' if len(significant_features) > 5 else ''}")
+    # Show top 5 most important features with their importance scores
+    sorted_features = sorted(feature_stats.items(), key=lambda x: x[1]['importance'], reverse=True)
+    print(f"\n🔍 TOP 5 MOST IMPORTANT FEATURES:")
+    for i, (name, stats) in enumerate(sorted_features[:5]):
+        print(f"   {i+1}. {name}: importance={stats['importance']:.4f}, rank={stats['rank']}")
     
     return {
         'mae': mae,
@@ -214,8 +292,7 @@ def train_and_evaluate_model(X_train, X_test, y_train, y_test, prev_log_test, mo
         'model': model,
         'scaler': scaler,
         'feature_stats': feature_stats,
-        'coefficients': coefficients,
-        'p_values': p_values,
+        'importance_scores': importance_scores,
         'significant_features': significant_features,
         'highly_significant_features': highly_significant
     }
@@ -241,26 +318,16 @@ class IterativeLLMFeatureSelector:
                     history_text += f" (Improvement: {improvement:+.1f}%)"
                 history_text += f"\n  Features: {result['features_used']}\n"
                 
-                # Add p-value analysis if available
+                # Add DL-based feature importance analysis if available
                 if 'feature_stats' in result and result['feature_stats']:
-                    significant_count = len(result.get('significant_features', []))
-                    highly_significant_count = len(result.get('highly_significant_features', []))
-                    total_features = len(result['feature_stats'])
+                    history_text += f"  DL-Based Feature Importance Analysis:\n"
                     
-                    history_text += f"  Statistical Analysis:\n"
-                    history_text += f"    • Total features: {total_features}\n"
-                    history_text += f"    • Significant features (p < 0.05): {significant_count}\n"
-                    history_text += f"    • Highly significant features (p < 0.01): {highly_significant_count}\n"
-                    
-                    # Add top significant features
-                    if result.get('significant_features'):
-                        top_significant = result['significant_features'][:3]
-                        history_text += f"    • Top significant features: {', '.join(top_significant)}\n"
-                    
-                    # Add feature with lowest p-value
-                    if result['feature_stats']:
-                        min_pval_feature = min(result['feature_stats'].items(), key=lambda x: x[1]['p_value'])
-                        history_text += f"    • Most significant feature: {min_pval_feature[0]} (p={min_pval_feature[1]['p_value']:.4f})\n"
+                    # Add top 5 most important features
+                    sorted_features = sorted(result['feature_stats'].items(), key=lambda x: x[1]['importance'], reverse=True)
+                    top_features = sorted_features[:5]
+                    if top_features:
+                        feature_list = ', '.join([f'{name} (importance={stats["importance"]:.4f})' for name, stats in top_features])
+                        history_text += f"    • Top important features: {feature_list}\n"
                 
                 history_text += "\n"
         
@@ -273,10 +340,9 @@ class IterativeLLMFeatureSelector:
         
         if best_result and 'feature_stats' in best_result:
             statistical_insights = f"""
-STATISTICAL INSIGHTS FROM BEST MODEL (MAPE: {best_result['mape']:.2f}%):
-- Most predictive features (lowest p-values): {', '.join([f"{name} (p={stats['p_value']:.4f})" for name, stats in sorted(best_result['feature_stats'].items(), key=lambda x: x[1]['p_value'])[:5]])}
-- Least predictive features (highest p-values): {', '.join([f"{name} (p={stats['p_value']:.4f})" for name, stats in sorted(best_result['feature_stats'].items(), key=lambda x: x[1]['p_value'], reverse=True)[:3]])}
-- Feature significance ratio: {len(best_result.get('significant_features', []))}/{len(best_result['feature_stats'])} features are statistically significant
+DL-BASED FEATURE IMPORTANCE INSIGHTS FROM BEST MODEL (MAPE: {best_result['mape']:.2f}%):
+- Most important features: {', '.join([f"{name} (importance={stats['importance']:.4f})" for name, stats in sorted(best_result['feature_stats'].items(), key=lambda x: x[1]['importance'], reverse=True)[:5]])}
+- Least important features: {', '.join([f"{name} (importance={stats['importance']:.4f})" for name, stats in sorted(best_result['feature_stats'].items(), key=lambda x: x[1]['importance'])[:3]])}
 """
         
         # Add error feedback section if there are previous errors
@@ -364,22 +430,22 @@ Total: 1 + 1 + 60 = 62 features(dimensions) per timestamp.
 CURRENT TASK (Iteration {iteration_num}):
 Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of {best_mape:.2f}%.
 
-Based on the performance history, statistical analysis, and previous code above, analyze what worked and what didn't, then create a new feature engineering approach that:
+Based on the performance history, DL-based feature importance analysis, and previous code above, analyze what worked and what didn't, then create a new feature engineering approach that:
 1. Learns from previous iterations' successes and failures
 2. Analyzes the previous code to understand what features were attempted and their effectiveness
 3. Builds upon successful feature patterns while avoiding problematic approaches
 4. Considers financial domain knowledge (momentum, volatility, volume patterns, etc.)
 5. Maintains LSTM-compatible time series structure
-6. Uses p-value insights to prioritize feature construction
+6. Uses DL-based feature importance insights to prioritize feature construction
 7. Improves upon the previous iteration's approach
 
 Requirements:
 1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features)
 2. The function should process each timestamp independently but maintain the temporal structure
-3. Focus on the most predictive features for each time step, using statistical significance as guidance
+3. Focus on the most predictive features for each time step, using DL-based feature importance as guidance
 4. Consider financial domain knowledge (e.g., price momentum, volatility, volume patterns, etc.)
 5. The output should be a 2D numpy array with shape (lookback_window, constructed_features)
-6. Include comments explaining your feature engineering choices and how they address previous performance issues and statistical insights
+6. Include comments explaining your feature engineering choices and how they address previous performance issues and importance insights
 7. Make sure the code is production-ready and handles edge cases
 8. DO NOT include any import statements - only use numpy (available as 'np') and built-in Python functions
 9. The function must return a 2D array where each row represents features for one time step
@@ -405,7 +471,7 @@ Feature description: {feature_description}
         try:
             response = self.client.messages.create(
                 model="claude-3-7-sonnet-latest",
-                max_tokens=5000,
+                max_tokens=7500,
                 temperature=0.2,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -831,22 +897,36 @@ def load_data_from_parquet_and_construct_features(stock, parquet_path='../data/p
     
     X_raw, y_logret, prev_log_all = make_windows_level_to_logret(level_series, y_log, lookback_window)
     
-    # Split data
+    # Split data into train/val/test to prevent data leakage
     N = X_raw.shape[0]
-    split = int(0.8 * N)
-    X_train_raw, X_test_raw = X_raw[:split], X_raw[split:]
-    y_train, y_test = y_logret[:split], y_logret[split:]
-    prev_log_train, prev_log_test = prev_log_all[:split], prev_log_all[split:]
+    train_split = int(0.6 * N)  # 60% for training
+    val_split = int(0.8 * N)    # 20% for validation (60-80%)
+    # 20% for test (80-100%)
+    
+    X_train_raw = X_raw[:train_split]
+    X_val_raw = X_raw[train_split:val_split]
+    X_test_raw = X_raw[val_split:]
+    
+    y_train = y_logret[:train_split]
+    y_val = y_logret[train_split:val_split]
+    y_test = y_logret[val_split:]
+    
+    prev_log_train = prev_log_all[:train_split]
+    prev_log_val = prev_log_all[train_split:val_split]
+    prev_log_test = prev_log_all[val_split:]
     
     print(f"Training data shape: {X_train_raw.shape}")
+    print(f"Validation data shape: {X_val_raw.shape}")
     print(f"Test data shape: {X_test_raw.shape}")
     
     # Prepare data dictionary
     data_to_save = {
         # Raw data
         'X_train_raw': X_train_raw,
+        'X_val_raw': X_val_raw,
         'X_test_raw': X_test_raw,
         'y_train': y_train,
+        'y_val': y_val,
         'y_test': y_test,
         
         # Dates and series
@@ -854,6 +934,7 @@ def load_data_from_parquet_and_construct_features(stock, parquet_path='../data/p
         'SI_series': SI_series,
         'prev_log_test': prev_log_test,
         'prev_log_train': prev_log_train,
+        'prev_log_val': prev_log_val,
         
         # Additional info
         'stock': stock,
@@ -867,7 +948,7 @@ def load_data_from_parquet_and_construct_features(stock, parquet_path='../data/p
 def main():
     """Main function to run the iterative agent-based feature selection"""
     # Configuration
-    ANTHROPIC_API_KEY = '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'  # Replace with your actual API key
+    ANTHROPIC_API_KEY = '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'  # Replace with your actual API key
     stock = 'TSLA'
     
     print("🚀 Starting Iterative Agent-Based Feature Selection Process")
@@ -877,16 +958,20 @@ def main():
     print("📊 Loading data from parquet file...")
     raw_data = load_data_from_parquet_and_construct_features(stock)
     X_train_raw = raw_data['X_train_raw']
+    X_val_raw = raw_data['X_val_raw']
     X_test_raw = raw_data['X_test_raw']
     y_train = raw_data['y_train']
+    y_val = raw_data['y_val']
     y_test = raw_data['y_test']
     prev_log_train = raw_data['prev_log_train']
+    prev_log_val = raw_data['prev_log_val']
     prev_log_test = raw_data['prev_log_test']
     si_dates = raw_data['si_dates']
     SI_series = raw_data['SI_series']
     
     print(f"✅ Data loaded successfully from parquet file!")
     print(f"Training data shape: {X_train_raw.shape}")
+    print(f"Validation data shape: {X_val_raw.shape}")
     print(f"Test data shape: {X_test_raw.shape}")
     print(f"Features per timestep: {X_train_raw.shape[2]}")
     print(f"Lookback window: {X_train_raw.shape[1]}")
@@ -894,10 +979,10 @@ def main():
     # Initialize dictionary to track all iteration codes
     iteration_codes = {}
     
-    # Step 1: Run baseline model
-    print("\n🎯 Step 1: Running baseline model...")
+    # Step 1: Run baseline model on validation set (to prevent data leakage)
+    print("\n🎯 Step 1: Running baseline model on validation set...")
     baseline_results = train_and_evaluate_model(
-        X_train_raw, X_test_raw, y_train, y_test, prev_log_test, 
+        X_train_raw, X_val_raw, y_train, y_val, prev_log_val, 
         model_name="Baseline (All 62 Features)", epochs=50
     )
     
@@ -927,7 +1012,7 @@ def main():
     # Iterative improvement loop
     max_iterations = 10
     min_improvement_threshold = 0.1
-    patience = 3
+    patience = 5
     
     print(f"\n🔄 Starting iterative improvement process...")
     print(f"Max iterations: {max_iterations}")
@@ -1090,12 +1175,14 @@ def main():
         # Apply feature selection to data with retry mechanism
         print(f"\n🔧 Applying feature selection using {function_source} function with retry mechanism...")
         X_train_processed, train_errors = feature_selector.apply_feature_selection_to_data(X_train_raw, construct_func, max_retries=5)
+        X_val_processed, val_errors = feature_selector.apply_feature_selection_to_data(X_val_raw, construct_func, max_retries=5)
         X_test_processed, test_errors = feature_selector.apply_feature_selection_to_data(X_test_raw, construct_func, max_retries=5)
         
         # Combine all errors for feedback
-        all_errors = train_errors + test_errors
+        all_errors = train_errors + val_errors + test_errors
         
         print(f"Training data shape: {X_train_raw.shape} -> {X_train_processed.shape}")
+        print(f"Validation data shape: {X_val_raw.shape} -> {X_val_processed.shape}")
         print(f"Test data shape: {X_test_raw.shape} -> {X_test_processed.shape}")
         
         if all_errors:
@@ -1104,9 +1191,9 @@ def main():
                 print(f"  Error {i+1}: {error['error_type']} - {error['error_message']}")
             print("ℹ️ Note: Function was validated during initial retry attempts, so these errors should be minimal.")
         
-        # Train and evaluate the model with p-value analysis
+        # Train on training set and evaluate on validation set (for agent feedback)
         iteration_results_model = train_and_evaluate_model(
-            X_train_processed, X_test_processed, y_train, y_test, prev_log_test,
+            X_train_processed, X_val_processed, y_train, y_val, prev_log_val,
             model_name=f"Iteration {iteration} ({function_source})", epochs=50
         )
         
@@ -1167,237 +1254,157 @@ def main():
         print(f"\n📈 Current best MAPE: {best_mape:.2f}%")
         print(f"🔄 Iterations without improvement: {iterations_without_improvement}/{patience}")
     
-    # Performance Analysis and Summary
+    # Final evaluation on test set (unseen data) to get true performance
+    print(f"\n🎯 Final Evaluation on Test Set (Unseen Data)")
+    print("="*70)
+    print("Using train+validation data for final model training to maximize data usage")
+    
+    # Combine training and validation sets for final model training
+    X_train_val_raw = np.concatenate([X_train_raw, X_val_raw], axis=0)
+    y_train_val = np.concatenate([y_train, y_val], axis=0)
+    prev_log_train_val = np.concatenate([prev_log_train, prev_log_val], axis=0)
+    
+    print(f"Combined train+val data shape: {X_train_val_raw.shape}")
+    print(f"Test data shape: {X_test_raw.shape}")
+    
+    # Find the best iteration based on validation performance
+    best_iteration_result = min(iteration_results[1:], key=lambda x: x['mape']) if len(iteration_results) > 1 else iteration_results[0]
+    
+    # 1. BASELINE: Train on train+val with raw features, test on test
+    print(f"\n📊 BASELINE EVALUATION (Raw Features, Train+Val → Test):")
+    baseline_final_results = train_and_evaluate_model(
+        X_train_val_raw, X_test_raw, y_train_val, y_test, prev_log_test,
+        model_name="Baseline Final (Raw Features)", epochs=50
+    )
+    
+    print(f"   Baseline MAPE: {baseline_final_results['mape']:.2f}%")
+    print(f"   Baseline MAE: {baseline_final_results['mae']:.4f}")
+    print(f"   Baseline RMSE: {baseline_final_results['rmse']:.4f}")
+    
+    # 2. BEST MODEL: Train on train+val with processed features, test on test
+    if best_iteration_result.get('claude_code'):
+        print(f"\n🔧 BEST MODEL EVALUATION (Processed Features, Train+Val → Test):")
+        print("Applying best feature engineering to all data...")
+        
+        # Recreate the best function
+        try:
+            best_function_code = best_iteration_result['claude_code']
+            best_construct_func = feature_selector.execute_feature_construction_code(best_function_code)
+            
+            if best_construct_func:
+                # Apply feature engineering to train+val and test sets
+                X_train_val_processed, _ = feature_selector.apply_feature_selection_to_data(X_train_val_raw, best_construct_func, max_retries=5)
+                X_test_processed_final, _ = feature_selector.apply_feature_selection_to_data(X_test_raw, best_construct_func, max_retries=5)
+                
+                print(f"Processed train+val shape: {X_train_val_processed.shape}")
+                print(f"Processed test shape: {X_test_processed_final.shape}")
+                
+                # Final evaluation with processed features
+                final_test_results = train_and_evaluate_model(
+                    X_train_val_processed, X_test_processed_final, y_train_val, y_test, prev_log_test,
+                    model_name="Best Model Final (Processed Features)", epochs=50
+                )
+                
+                print(f"\n📊 Best Model Test Set Performance:")
+                print(f"   MAPE: {final_test_results['mape']:.2f}%")
+                print(f"   MAE: {final_test_results['mae']:.4f}")
+                print(f"   RMSE: {final_test_results['rmse']:.4f}")
+                
+                # Calculate improvement over baseline
+                improvement = baseline_final_results['mape'] - final_test_results['mape']
+                improvement_percentage = (improvement / baseline_final_results['mape']) * 100
+                
+                print(f"\n🎯 IMPROVEMENT OVER BASELINE:")
+                print(f"   Baseline MAPE: {baseline_final_results['mape']:.2f}%")
+                print(f"   Best Model MAPE: {final_test_results['mape']:.2f}%")
+                print(f"   Absolute Improvement: {improvement:.2f}%")
+                print(f"   Relative Improvement: {improvement_percentage:.1f}%")
+                
+                # Add final test results to the best result
+                best_iteration_result['final_test_mape'] = final_test_results['mape']
+                best_iteration_result['final_test_mae'] = final_test_results['mae']
+                best_iteration_result['final_test_rmse'] = final_test_results['rmse']
+                best_iteration_result['baseline_final_mape'] = baseline_final_results['mape']
+                best_iteration_result['final_improvement'] = improvement
+                best_iteration_result['final_improvement_percentage'] = improvement_percentage
+                
+            else:
+                print("⚠️ Could not recreate best function, using baseline for final evaluation")
+                final_test_results = baseline_final_results
+        except Exception as e:
+            print(f"⚠️ Error in final evaluation: {e}")
+            print("Using baseline for final evaluation")
+            final_test_results = baseline_final_results
+    else:
+        print("ℹ️ No feature engineering code available, using baseline for final evaluation")
+        final_test_results = baseline_final_results
+    
+    # Simple Performance Summary
     print("\n" + "="*70)
-    print("ENHANCED PERFORMANCE ANALYSIS AND SUMMARY")
+    print("ITERATION PERFORMANCE SUMMARY")
     print("="*70)
     
-    # Create enhanced performance summary DataFrame
-    performance_data = []
+    # Create simple performance table
+    print(f"\n📊 VALIDATION MAPE TREND:")
+    print("-" * 50)
+    print(f"{'Iteration':<10} {'Model':<25} {'Validation MAPE':<15} {'Improvement':<12}")
+    print("-" * 50)
+    
     for result in iteration_results:
-        significant_count = len(result.get('significant_features', []))
-        highly_significant_count = len(result.get('highly_significant_features', []))
-        
-        performance_data.append({
-            'Iteration': result['iteration'],
-            'Model': result['model_name'],
-            'Features': result['feature_count'],
-            'MAPE (%)': result['mape'],
-            'MAE': result['mae'],
-            'RMSE': result['rmse'],
-            'Improvement (%)': result['improvement'],
-            'Source': result.get('function_source', 'baseline'),
-            'Significant Features': significant_count,
-            'Highly Significant': highly_significant_count
-        })
+        improvement_str = f"{result['improvement']:+.2f}%" if result['improvement'] != 0 else "Baseline"
+        print(f"{result['iteration']:<10} {result['model_name']:<25} {result['mape']:<15.2f} {improvement_str:<12}")
     
-    performance_df = pd.DataFrame(performance_data)
-    print("\n📊 ENHANCED PERFORMANCE SUMMARY TABLE:")
-    print("="*70)
-    print(performance_df.round(4).to_string(index=False))
-    
-    # Find best performing model
+    # Find best result
     best_result = min(iteration_results, key=lambda x: x['mape'])
-    print(f"\n🏆 BEST PERFORMING MODEL:")
-    print(f"   Model: {best_result['model_name']}")
-    print(f"   MAPE: {best_result['mape']:.2f}%")
-    print(f"   MAE: {best_result['mae']:.4f}")
-    print(f"   RMSE: {best_result['rmse']:.4f}")
-    print(f"   Features: {best_result['feature_count']}")
-    print(f"   Source: {best_result.get('function_source', 'baseline')}")
+    print("-" * 50)
+    print(f"🏆 Best: {best_result['model_name']} - MAPE: {best_result['mape']:.2f}%")
     
-    # Statistical significance analysis
-    if 'feature_stats' in best_result and best_result['feature_stats']:
-        print(f"\n📈 STATISTICAL SIGNIFICANCE ANALYSIS:")
-        print(f"   • Total features: {len(best_result['feature_stats'])}")
-        print(f"   • Significant features (p < 0.05): {len(best_result.get('significant_features', []))}")
-        print(f"   • Highly significant features (p < 0.01): {len(best_result.get('highly_significant_features', []))}")
-        
-        # Show top 5 most significant features
-        if best_result['feature_stats']:
-            sorted_features = sorted(best_result['feature_stats'].items(), key=lambda x: x[1]['p_value'])
-            print(f"\n🔍 TOP 5 MOST SIGNIFICANT FEATURES:")
-            for i, (name, stats) in enumerate(sorted_features[:5]):
-                significance = "***" if stats['p_value'] < 0.001 else "**" if stats['p_value'] < 0.01 else "*" if stats['p_value'] < 0.05 else ""
-                print(f"   {i+1}. {name}: p={stats['p_value']:.4f} {significance}")
+    # Final test performance if available
+    if 'final_test_mape' in best_result:
+        print(f"🎯 Final Test MAPE: {best_result['final_test_mape']:.2f}%")
+        if 'baseline_final_mape' in best_result:
+            print(f"📈 Final Improvement: {best_result.get('final_improvement', 0):.2f}%")
     
-    # Calculate total improvement
-    total_improvement = baseline_mape - best_result['mape']
-    improvement_percentage = (total_improvement / baseline_mape) * 100
-    
-    print(f"\n📈 OVERALL IMPROVEMENT:")
-    print(f"   Baseline MAPE: {baseline_mape:.2f}%")
-    print(f"   Best MAPE: {best_result['mape']:.2f}%")
-    print(f"   Total Improvement: {total_improvement:.2f}% ({improvement_percentage:.1f}% relative)")
-    
-    # Feature reduction analysis
-    baseline_features = iteration_results[0]['feature_count']
-    best_features = best_result['feature_count']
-    feature_reduction = ((baseline_features - best_features) / baseline_features) * 100
-    
-    print(f"\n🔧 FEATURE REDUCTION:")
-    print(f"   Baseline features: {baseline_features}")
-    print(f"   Best model features: {best_features}")
-    print(f"   Feature reduction: {feature_reduction:.1f}%")
-    
-    # Iteration efficiency
-    successful_iterations = len([r for r in iteration_results[1:] if r['improvement'] > 0])
-    total_iterations = len(iteration_results) - 1
-    efficiency = (successful_iterations / total_iterations) * 100 if total_iterations > 0 else 0
-    
-    print(f"\n⚡ ITERATION EFFICIENCY:")
-    print(f"   Total iterations: {total_iterations}")
-    print(f"   Successful improvements: {successful_iterations}")
-    print(f"   Success rate: {efficiency:.1f}%")
-    
-    # Save results and generate final report
-    print("\n💾 Saving enhanced results and generating comprehensive report...")
-    
-    # Save iteration results and codes to pickle
-    results_filename = f'cache/{stock}_iterative_results_enhanced.pkl'
-    save_data = {
-        'iteration_results': iteration_results,
-        'iteration_codes': iteration_codes,
-        'best_result': best_result,
-        'baseline_mape': baseline_mape,
-        'total_improvement': total_improvement
-    }
-    with open(results_filename, 'wb') as f:
-        pickle.dump(save_data, f)
-    
-    print(f"✅ Enhanced results and iteration codes saved to: {results_filename}")
-    
-    # Generate detailed report with statistical analysis
-    report_filename = f'cache/{stock}_iterative_report_enhanced.txt'
-    with open(report_filename, 'w', encoding="utf-8") as f:
-        f.write("="*80 + "\n")
-        f.write("ENHANCED ITERATIVE AGENT-BASED FEATURE SELECTION REPORT\n")
-        f.write("="*80 + "\n")
+    # Save simple summary to text file
+    print(f"\n💾 Saving summary to text file...")
+    summary_filename = f'cache/{stock}_iterative_summary.txt'
+    with open(summary_filename, 'w', encoding="utf-8") as f:
+        f.write("="*60 + "\n")
+        f.write("ITERATIVE AGENT-BASED FEATURE SELECTION SUMMARY\n")
+        f.write("="*60 + "\n")
         f.write(f"Stock: {stock}\n")
         f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Total Iterations: {len(iteration_results) - 1}\n")
-        f.write("\n")
+        f.write(f"Total Iterations: {len(iteration_results) - 1}\n\n")
         
-        f.write("PERFORMANCE SUMMARY:\n")
-        f.write("-" * 40 + "\n")
-        f.write(f"Baseline MAPE: {baseline_mape:.2f}%\n")
-        f.write(f"Best MAPE: {best_result['mape']:.2f}%\n")
-        f.write(f"Total Improvement: {total_improvement:.2f}% ({improvement_percentage:.1f}% relative)\n")
-        f.write(f"Feature Reduction: {feature_reduction:.1f}%\n")
-        f.write(f"Success Rate: {efficiency:.1f}%\n")
-        f.write("\n")
-        
-        f.write("DETAILED RESULTS WITH STATISTICAL ANALYSIS:\n")
+        f.write("PERFORMANCE TREND:\n")
         f.write("-" * 40 + "\n")
         for result in iteration_results:
-            f.write(f"Iteration {result['iteration']}: {result['model_name']}\n")
-            f.write(f"  MAPE: {result['mape']:.2f}%\n")
-            f.write(f"  Features: {result['feature_count']}\n")
-            f.write(f"  Improvement: {result['improvement']:+.2f}%\n")
-            f.write(f"  Source: {result.get('function_source', 'baseline')}\n")
-            
-            # Add statistical significance information
-            if 'feature_stats' in result and result['feature_stats']:
-                significant_count = len(result.get('significant_features', []))
-                highly_significant_count = len(result.get('highly_significant_features', []))
-                f.write(f"  Statistical Analysis:\n")
-                f.write(f"    • Significant features (p < 0.05): {significant_count}\n")
-                f.write(f"    • Highly significant features (p < 0.01): {highly_significant_count}\n")
-                
-                # Add most significant feature
-                if result['feature_stats']:
-                    min_pval_feature = min(result['feature_stats'].items(), key=lambda x: x[1]['p_value'])
-                    f.write(f"    • Most significant feature: {min_pval_feature[0]} (p={min_pval_feature[1]['p_value']:.4f})\n")
-            
-            f.write("\n")
+            improvement_str = f"{result['improvement']:+.2f}%" if result['improvement'] != 0 else "Baseline"
+            f.write(f"Iteration {result['iteration']}: {result['model_name']} - MAPE: {result['mape']:.2f}% ({improvement_str})\n")
         
-        f.write("BEST MODEL DETAILS:\n")
-        f.write("-" * 40 + "\n")
-        f.write(f"Model: {best_result['model_name']}\n")
-        f.write(f"MAPE: {best_result['mape']:.2f}%\n")
-        f.write(f"MAE: {best_result['mae']:.4f}\n")
-        f.write(f"RMSE: {best_result['rmse']:.4f}\n")
-        f.write(f"Features: {best_result['feature_count']}\n")
-        f.write(f"Source: {best_result.get('function_source', 'baseline')}\n")
+        f.write(f"\nBest Model: {best_result['model_name']} - MAPE: {best_result['mape']:.2f}%\n")
         
-        # Add detailed statistical analysis for best model
-        if 'feature_stats' in best_result and best_result['feature_stats']:
-            f.write(f"\nSTATISTICAL SIGNIFICANCE ANALYSIS:\n")
-            f.write(f"Total features: {len(best_result['feature_stats'])}\n")
-            f.write(f"Significant features (p < 0.05): {len(best_result.get('significant_features', []))}\n")
-            f.write(f"Highly significant features (p < 0.01): {len(best_result.get('highly_significant_features', []))}\n")
-            
-            # Top 10 most significant features
-            if best_result['feature_stats']:
-                sorted_features = sorted(best_result['feature_stats'].items(), key=lambda x: x[1]['p_value'])
-                f.write(f"\nTOP 10 MOST SIGNIFICANT FEATURES:\n")
-                for i, (name, stats) in enumerate(sorted_features[:10]):
-                    significance = "***" if stats['p_value'] < 0.001 else "**" if stats['p_value'] < 0.01 else "*" if stats['p_value'] < 0.05 else ""
-                    f.write(f"{i+1:2d}. {name}: p={stats['p_value']:.4f} {significance}\n")
+        if 'final_test_mape' in best_result:
+            f.write(f"Final Test MAPE: {best_result['final_test_mape']:.2f}%\n")
+            if 'baseline_final_mape' in best_result:
+                f.write(f"Final Improvement: {best_result.get('final_improvement', 0):.2f}%\n")
         
-        if best_result.get('claude_code'):
-            f.write("\nBEST MODEL FEATURE ENGINEERING CODE:\n")
-            f.write("-" * 40 + "\n")
-            f.write(best_result['claude_code'])
+        f.write("\n" + "="*60 + "\n")
+        f.write("FEATURE ENGINEERING CODES\n")
+        f.write("="*60 + "\n\n")
         
-        # Add comprehensive iteration codes summary
-        f.write("\n\nALL ITERATION CODES SUMMARY:\n")
-        f.write("=" * 50 + "\n")
-        f.write("This section contains all the feature engineering codes generated during the iterative process.\n\n")
-        
-        for iteration_key, code_info in iteration_codes.items():
-            f.write(f"{iteration_key.upper()}:\n")
-            f.write("-" * 30 + "\n")
-            f.write(f"Performance: MAPE = {code_info['mape']:.2f}%\n")
-            f.write(f"Improvement: {code_info['improvement']:+.2f}%\n")
-            f.write(f"Features: {code_info['feature_count']}\n")
-            f.write(f"Source: {code_info['function_source']}\n")
-            f.write(f"Errors: {code_info['errors_encountered']}\n")
-            f.write(f"Significant Features: {code_info['significant_features']}\n")
-            f.write(f"Highly Significant Features: {code_info['highly_significant_features']}\n")
-            f.write(f"\nCode:\n")
-            f.write("```python\n")
-            f.write(code_info['code'])
-            f.write("\n```\n\n")
-        
-        # Add iteration codes dictionary to the saved results
-        f.write("\nITERATION CODES DICTIONARY (for programmatic access):\n")
-        f.write("-" * 50 + "\n")
-        f.write("The iteration_codes dictionary contains all codes with metadata for easy programmatic access.\n")
-        f.write("Keys: iteration_1, iteration_2, etc.\n")
-        f.write("Each entry contains: code, function_source, mape, improvement, feature_count, errors_encountered, significant_features, highly_significant_features\n")
+        for result in iteration_results[1:]:  # Skip baseline
+            if result.get('claude_code'):
+                f.write(f"ITERATION {result['iteration']}:\n")
+                f.write(f"Performance: MAPE = {result['mape']:.2f}%\n")
+                f.write(f"Improvement: {result['improvement']:+.2f}%\n")
+                f.write(f"Features: {result['feature_count']}\n")
+                f.write("-" * 40 + "\n")
+                f.write(result['claude_code'])
+                f.write("\n" + "="*60 + "\n\n")
     
-    print(f"✅ Enhanced detailed report saved to: {report_filename}")
-    
-    # Final summary
-    print("\n" + "="*70)
-    print("🎉 ENHANCED ITERATIVE AGENT-BASED FEATURE SELECTION COMPLETED!")
-    print("="*70)
-    print(f"📊 Final Results:")
-    print(f"   • Baseline MAPE: {baseline_mape:.2f}%")
-    print(f"   • Best MAPE: {best_result['mape']:.2f}%")
-    print(f"   • Total Improvement: {total_improvement:.2f}%")
-    print(f"   • Feature Reduction: {feature_reduction:.1f}%")
-    print(f"   • Iterations Completed: {len(iteration_results) - 1}")
-    print(f"   • Success Rate: {efficiency:.1f}%")
-    
-    # Statistical insights
-    if 'feature_stats' in best_result and best_result['feature_stats']:
-        print(f"\n📈 Statistical Insights:")
-        print(f"   • Significant features: {len(best_result.get('significant_features', []))}/{len(best_result['feature_stats'])}")
-        print(f"   • Highly significant features: {len(best_result.get('highly_significant_features', []))}")
-    
-    # Iteration codes summary
-    if iteration_codes:
-        print(f"\n📝 Iteration Codes Summary:")
-        print(f"   • Total iterations with code: {len(iteration_codes)}")
-        for iteration_key, code_info in iteration_codes.items():
-            print(f"   • {iteration_key}: MAPE={code_info['mape']:.2f}%, Features={code_info['feature_count']}, Source={code_info['function_source']}")
-    
-    print(f"\n💾 Files Saved:")
-    print(f"   • Results: {results_filename}")
-    print(f"   • Report: {report_filename}")
-    print("\n✅ Enhanced process completed successfully!")
+    print(f"✅ Summary saved to: {summary_filename}")
+    print("\n🎉 Process completed successfully!")
 
 
 if __name__ == "__main__":

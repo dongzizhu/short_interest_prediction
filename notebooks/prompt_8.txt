@@ -1,0 +1,420 @@
+
+You are a financial data scientist expert in feature engineering for Short Interest prediction models. 
+
+I have financial time series data with the following structure:
+- Shape: (samples, lookback_window=4, features=62)
+- Features at each timestamp T include:
+  1. Short interest at time T reported every 15 days (1 dimension)
+  2. Average daily volume quantity of past 15 days (1 dimension) 
+  3. OHLC (Open, High, Low, Close) prices for past 15 days (4 × 15 = 60 dimensions)
+
+Total: 1 + 1 + 60 = 62 features(dimensions) per timestamp.
+
+
+
+PERFORMANCE HISTORY:
+Iteration 0: Baseline - MAPE: 5.90%
+  Features: All 62 original features
+  Statistical Analysis:
+    • Total features: 62
+    • Significant features (p < 0.05): 27
+    • Highly significant features (p < 0.01): 21
+    • Top significant features: Feature_0, Feature_1, Feature_2
+    • Most significant feature: Feature_60 (p=0.0000)
+
+Iteration 1: Iteration 1 - MAPE: 7.64% (Improvement: -1.7%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 20
+    • Significant features (p < 0.05): 2
+    • Highly significant features (p < 0.01): 2
+    • Top significant features: Feature_5, Feature_6
+    • Most significant feature: Feature_5 (p=0.0027)
+
+Iteration 2: Iteration 2 - MAPE: 5.87% (Improvement: +0.0%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 40
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 3: Iteration 3 - MAPE: 5.47% (Improvement: +0.4%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 50
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 4: Iteration 4 - MAPE: 5.60% (Improvement: -0.1%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 45
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 5: Iteration 5 - MAPE: 5.87% (Improvement: -0.4%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 35
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 6: Iteration 6 - MAPE: 5.19% (Improvement: +0.3%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 55
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 7: Iteration 7 - MAPE: 6.42% (Improvement: -1.2%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 40
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+
+
+
+STATISTICAL INSIGHTS FROM BEST MODEL (MAPE: 5.19%):
+- Most predictive features (lowest p-values): Feature_0 (p=0.5000), Feature_1 (p=0.5000), Feature_2 (p=0.5000), Feature_3 (p=0.5000), Feature_4 (p=0.5000)
+- Least predictive features (highest p-values): Feature_0 (p=0.5000), Feature_1 (p=0.5000), Feature_2 (p=0.5000)
+- Feature significance ratio: 0/55 features are statistically significant
+
+
+
+
+
+
+PREVIOUS ITERATION CODE:
+The following code was used in the most recent iteration (Iteration 7):
+
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction based on comprehensive analysis of previous iterations.
+    
+    Key insights from performance history:
+    - Baseline model (62 features) had 27 significant features and performed well (MAPE: 5.90%)
+    - Iteration 6 (55 features) achieved best MAPE of 5.19% but had 0 significant features
+    - Statistical significance appears to be inversely related to feature count in some iterations
+    
+    This implementation:
+    - Focuses on creating fewer, more statistically meaningful features (40 total)
+    - Emphasizes direct relationships between short interest and other metrics
+    - Introduces more sophisticated financial indicators with theoretical backing
+    - Adds non-linear transformations and interaction terms
+    - Prioritizes features that capture short interest dynamics and market sentiment
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing financial data
+            - Feature 0: Short interest
+            - Feature 1: Average daily volume
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, 40) with engineered features
+    """
+    # Handle edge cases
+    if data is None or data.size == 0:
+        return np.zeros((0, 40))
+    
+    lookback_window = data.shape[0]
+    
+    # Initialize output array with 40 features
+    # Reducing from previous iteration's 55 features to focus on quality over quantity
+    # This addresses the pattern where fewer, more focused features often yield better results
+    output_features = np.zeros((lookback_window, 40))
+    
+    # Process each timestamp independently
+    for t in range(lookback_window):
+        # Extract current timestamp data
+        current_data = np.nan_to_num(data[t], nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]  # Feature_0
+        avg_volume = current_data[1]      # Feature_1
+        
+        # Reshape OHLC data for easier processing
+        ohlc_data = current_data[2:62].reshape(15, 4)  # (15 days, 4 OHLC values)
+        open_prices = ohlc_data[:, 0]
+        high_prices = ohlc_data[:, 1]
+        low_prices = ohlc_data[:, 2]
+        close_prices = ohlc_data[:, 3]
+        
+        # Calculate daily returns and log returns (better for statistical properties)
+        daily_returns = np.zeros(len(close_prices)-1)
+        log_returns = np.zeros(len(close_prices)-1)
+        if len(close_prices) > 1:
+            daily_returns = np.diff(close_prices) / (close_prices[:-1] + 1e-8)
+            # Log returns are more normally distributed and better for statistical analysis
+            log_returns = np.log(close_prices[1:] / (close_prices[:-1] + 1e-8))
+        
+        # 1. CORE SHORT INTEREST FEATURES - Focus on the primary prediction target
+        output_features[t, 0] = short_interest  # Raw short interest
+        
+        # Short interest relative to float (simulated with volume as proxy)
+        output_features[t, 1] = short_interest / (avg_volume * 20 + 1e-8)  # 20 days as proxy for float
+        
+        # Days to cover - key metric for short squeeze potential
+        output_features[t, 2] = short_interest / (avg_volume + 1e-8)
+        
+        # Short interest momentum (rate of change)
+        if t > 0 and data[t-1, 0] > 0:
+            output_features[t, 3] = short_interest / data[t-1, 0] - 1
+            # Log transformation of momentum (better statistical properties)
+            ratio = short_interest / (data[t-1, 0] + 1e-8)
+            output_features[t, 4] = np.log(ratio) if ratio > 0 else 0
+        
+        # Short interest acceleration (second derivative)
+        if t >= 2 and data[t-1, 0] > 0 and data[t-2, 0] > 0:
+            prev_momentum = data[t-1, 0] / data[t-2, 0] - 1
+            current_momentum = short_interest / data[t-1, 0] - 1
+            output_features[t, 5] = current_momentum - prev_momentum
+        
+        # 2. PRICE ACTION RELATIVE TO SHORT INTEREST
+        # This section focuses on the relationship between price movements and short interest
+        if len(close_prices) > 0:
+            # Price change during high short interest periods
+            output_features[t, 6] = (close_prices[-1] / (close_prices[0] + 1e-8) - 1) * short_interest
+            
+            # Recent price momentum weighted by short interest
+            if len(close_prices) >= 5:
+                recent_return = close_prices[-1] / (close_prices[-5] + 1e-8) - 1
+                output_features[t, 7] = recent_return * short_interest
+                
+                # Non-linear transformation of price momentum (captures exponential effects)
+                output_features[t, 8] = np.sign(recent_return) * (recent_return ** 2) * short_interest
+        
+        # 3. VOLATILITY METRICS WITH SHORT INTEREST INTERACTION
+        # Volatility is a key factor in short squeeze scenarios
+        if len(daily_returns) >= 10:
+            volatility = np.std(daily_returns[-10:])
+            # Volatility interaction with short interest
+            output_features[t, 9] = volatility * short_interest
+            
+            # Volatility trend (increasing/decreasing volatility)
+            if len(daily_returns) >= 15:
+                vol_first_half = np.std(daily_returns[-15:-5])
+                vol_second_half = np.std(daily_returns[-5:])
+                vol_change = (vol_second_half / (vol_first_half + 1e-8)) - 1
+                output_features[t, 10] = vol_change * short_interest
+        
+        # 4. VOLUME ANALYSIS WITH SHORT INTEREST CONTEXT
+        # Volume is critical for short interest dynamics
+        # Volume trend
+        if t > 0:
+            vol_change = avg_volume / (data[t-1, 1] + 1e-8) - 1
+            output_features[t, 11] = vol_change
+            
+            # Volume surge indicator (large increases in volume)
+            output_features[t, 12] = 1.0 if vol_change > 0.5 else 0.0
+            
+            # Volume * short interest interaction
+            output_features[t, 13] = vol_change * short_interest
+        
+        # 5. ADVANCED TECHNICAL INDICATORS
+        # RSI (Relative Strength Index) - momentum oscillator
+        if len(daily_returns) >= 14:
+            gains = np.maximum(daily_returns[-14:], 0)
+            losses = np.abs(np.minimum(daily_returns[-14:], 0))
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            if avg_loss > 0:
+                rs = avg_gain / avg_loss
+                rsi = 100 - (100 / (1 + rs))
+            else:
+                rsi = 100
+            
+            output_features[t, 14] = rsi
+            
+            # RSI extremes (overbought/oversold) - binary indicators
+            output_features[t, 15] = 1.0 if rsi > 70 else 0.0  # Overbought
+            output_features[t, 16] = 1.0 if rsi < 30 else 0.0  # Oversold
+            
+            # RSI divergence with short interest (captures potential reversals)
+            if t > 0 and data[t-1, 0] > 0:
+                si_change = short_interest / data[t-1, 0] - 1
+                output_features[t, 17] = np.sign(si_change) * np.sign(rsi - 50)
+        
+        # 6. MEAN REVERSION AND MOMENTUM INDICATORS
+        if len(close_prices) >= 20:
+            # Mean reversion: distance from moving average
+            ma20 = np.mean(close_prices[-20:])
+            distance_from_ma = close_prices[-1] / ma20 - 1
+            output_features[t, 18] = distance_from_ma
+            
+            # Mean reversion potential (larger deviations have higher mean reversion potential)
+            output_features[t, 19] = distance_from_ma ** 2 * np.sign(distance_from_ma)
+            
+            # Bollinger Band position (normalized price position within bands)
+            std20 = np.std(close_prices[-20:])
+            upper_band = ma20 + 2 * std20
+            lower_band = ma20 - 2 * std20
+            band_width = upper_band - lower_band
+            if band_width > 0:
+                bb_position = (close_prices[-1] - lower_band) / band_width
+                output_features[t, 20] = bb_position
+                
+                # Bollinger Band squeeze indicator (narrow bands suggest potential breakout)
+                output_features[t, 21] = band_width / ma20
+        
+        # 7. SHORT SQUEEZE POTENTIAL METRICS
+        # Composite indicators for short squeeze likelihood
+        if len(close_prices) >= 5 and t > 0:
+            # Price momentum
+            price_momentum = (close_prices[-1] / close_prices[-5]) - 1
+            
+            # Volume surge
+            volume_surge = avg_volume / (data[t-1, 1] + 1e-8)
+            
+            # Short squeeze potential formula (combines key factors)
+            squeeze_potential = short_interest * max(0, price_momentum) * max(1, volume_surge)
+            output_features[t, 22] = squeeze_potential
+            
+            # Log-transformed squeeze potential (better statistical properties)
+            output_features[t, 23] = np.log1p(squeeze_potential)
+            
+            # Short squeeze imminent indicator (high short interest + positive momentum + high volume)
+            squeeze_imminent = (short_interest > np.mean(short_interest) and 
+                               price_momentum > 0 and 
+                               volume_surge > 1.2)
+            output_features[t, 24] = 1.0 if squeeze_imminent else 0.0
+        
+        # 8. TREND ANALYSIS AND PATTERN RECOGNITION
+        if len(close_prices) >= 10:
+            x = np.arange(len(close_prices[-10:]))
+            slope, intercept = np.polyfit(x, close_prices[-10:], 1)
+            
+            # Trend direction and strength
+            normalized_slope = slope / (np.mean(close_prices[-10:]) + 1e-8)
+            output_features[t, 25] = normalized_slope
+            
+            # Trend consistency (R-squared)
+            y_pred = slope * x + intercept
+            ss_tot = np.sum((close_prices[-10:] - np.mean(close_prices[-10:]))**2)
+            ss_res = np.sum((close_prices[-10:] - y_pred)**2)
+            r_squared = 1 - (ss_res / (ss_tot + 1e-8))
+            output_features[t, 26] = r_squared
+            
+            # Trend strength * short interest interaction
+            output_features[t, 27] = normalized_slope * short_interest
+            
+            # Trend reversal potential (high short interest against trend)
+            output_features[t, 28] = -normalized_slope * short_interest if normalized_slope * short_interest < 0 else 0
+        
+        # 9. MARKET SENTIMENT INDICATORS
+        if len(daily_returns) >= 10:
+            # Positive vs negative days ratio
+            pos_days = np.sum(daily_returns[-10:] > 0)
+            neg_days = np.sum(daily_returns[-10:] < 0)
+            sentiment_ratio = pos_days / (neg_days + 1e-8)
+            output_features[t, 29] = sentiment_ratio
+            
+            # Sentiment shift (recent vs older sentiment)
+            if len(daily_returns) >= 20:
+                recent_pos = np.sum(daily_returns[-10:] > 0)
+                older_pos = np.sum(daily_returns[-20:-10] > 0)
+                sentiment_shift = recent_pos - older_pos
+                output_features[t, 30] = sentiment_shift / 10.0  # Normalize to [-1, 1]
+                
+                # Sentiment shift * short interest interaction
+                output_features[t, 31] = sentiment_shift * short_interest / 10.0
+        
+        # 10. NON-LINEAR TRANSFORMATIONS AND ADVANCED INTERACTIONS
+        # Log transformation of short interest (better statistical properties)
+        output_features[t, 32] = np.log1p(short_interest)
+        
+        # Squared short interest (captures non-linear effects)
+        output_features[t, 33] = short_interest ** 2
+        
+        # Short interest / price ratio (fundamental relationship)
+        if len(close_prices) > 0 and close_prices[-1] > 0:
+            output_features[t, 34] = short_interest / close_prices[-1]
+        
+        # 11. TIME-BASED PATTERNS IN SHORT INTEREST
+        # Short interest trend consistency
+        if t >= 3:
+            si_values = [data[t-i, 0] for i in range(min(3, t+1))]
+            si_trend = np.all(np.diff(si_values) > 0) or np.all(np.diff(si_values) < 0)
+            output_features[t, 35] = 1.0 if si_trend else 0.0
+            
+            # Short interest volatility
+            output_features[t, 36] = np.std(si_values) / (np.mean(si_values) + 1e-8)
+        
+        # 12. COMPOSITE MARKET INDICATORS
+        # Market strength indicator (combines price, volume, volatility)
+        if len(close_prices) >= 5 and len(daily_returns) >= 5:
+            price_change = close_prices[-1] / (close_prices[-5] + 1e-8) - 1
+            vol = np.std(daily_returns[-5:])
+            market_strength = price_change * avg_volume * vol
+            output_features[t, 37] = market_strength
+            
+            # Market strength * short interest interaction
+            output_features[t, 38] = market_strength * short_interest
+        
+        # 13. HISTORICAL SHORT INTEREST PATTERNS
+        # Short interest relative to historical range
+        if t >= 4:
+            historical_si = [data[t-i, 0] for i in range(1, min(5, t+1))]
+            if historical_si:
+                si_min = np.min(historical_si)
+                si_max = np.max(historical_si)
+                si_range = si_max - si_min
+                if si_range > 0:
+                    # Normalized position within historical range [0,1]
+                    output_features[t, 39] = (short_interest - si_min) / si_range
+    
+    # Handle any NaN values that might have been created
+    output_features = np.nan_to_num(output_features, nan=0.0)
+    
+    return output_features
+```
+
+Performance of this code: MAPE = 6.42%
+Change from previous: -1.23%
+Statistical Analysis: 0/40 features were significant (p < 0.05), 0 were highly significant (p < 0.01)
+
+INSTRUCTIONS FOR NEW CODE:
+- Analyze the previous code and understand what features it tried to create
+- Identify what worked well and what didn't work based on performance and statistical significance
+- If the previous code worked but had poor performance, try different feature engineering approaches
+- Consider the statistical significance of features - focus on creating features that are likely to be statistically significant
+- Your new code should be an improvement over the previous attempt
+- Think about what additional financial insights or technical indicators could be valuable
+
+
+CURRENT TASK (Iteration 8):
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 5.19%.
+
+Based on the performance history, statistical analysis, and previous code above, analyze what worked and what didn't, then create a new feature engineering approach that:
+1. Learns from previous iterations' successes and failures
+2. Analyzes the previous code to understand what features were attempted and their effectiveness
+3. Builds upon successful feature patterns while avoiding problematic approaches
+4. Considers financial domain knowledge (momentum, volatility, volume patterns, etc.)
+5. Maintains LSTM-compatible time series structure
+6. Uses p-value insights to prioritize feature construction
+7. Improves upon the previous iteration's approach
+
+Requirements:
+1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features)
+2. The function should process each timestamp independently but maintain the temporal structure
+3. Focus on the most predictive features for each time step, using statistical significance as guidance
+4. Consider financial domain knowledge (e.g., price momentum, volatility, volume patterns, etc.)
+5. The output should be a 2D numpy array with shape (lookback_window, constructed_features)
+6. Include comments explaining your feature engineering choices and how they address previous performance issues and statistical insights
+7. Make sure the code is production-ready and handles edge cases
+8. DO NOT include any import statements - only use numpy (available as 'np') and built-in Python functions
+9. The function must return a 2D array where each row represents features for one time step
+10. Use numpy nan_to_num to handle NaN values
+11. Analyze the previous iteration's code and explain in comments how your approach differs and improves upon it
+
+Please provide ONLY the Python function code, no explanations outside the code comments.
+
+Feature description: Stock short interest prediction with past short interest, volume, and OHLC data for iterative improvement

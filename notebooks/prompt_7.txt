@@ -1,0 +1,366 @@
+
+You are a financial data scientist expert in feature engineering for Short Interest prediction models. 
+
+I have financial time series data with the following structure:
+- Shape: (samples, lookback_window=4, features=62)
+- Features at each timestamp T include:
+  1. Short interest at time T reported every 15 days (1 dimension)
+  2. Average daily volume quantity of past 15 days (1 dimension) 
+  3. OHLC (Open, High, Low, Close) prices for past 15 days (4 × 15 = 60 dimensions)
+
+Total: 1 + 1 + 60 = 62 features(dimensions) per timestamp.
+
+
+
+PERFORMANCE HISTORY:
+Iteration 0: Baseline - MAPE: 5.90%
+  Features: All 62 original features
+  Statistical Analysis:
+    • Total features: 62
+    • Significant features (p < 0.05): 27
+    • Highly significant features (p < 0.01): 21
+    • Top significant features: Feature_0, Feature_1, Feature_2
+    • Most significant feature: Feature_60 (p=0.0000)
+
+Iteration 1: Iteration 1 - MAPE: 7.64% (Improvement: -1.7%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 20
+    • Significant features (p < 0.05): 2
+    • Highly significant features (p < 0.01): 2
+    • Top significant features: Feature_5, Feature_6
+    • Most significant feature: Feature_5 (p=0.0027)
+
+Iteration 2: Iteration 2 - MAPE: 5.87% (Improvement: +0.0%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 40
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 3: Iteration 3 - MAPE: 5.47% (Improvement: +0.4%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 50
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 4: Iteration 4 - MAPE: 5.60% (Improvement: -0.1%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 45
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 5: Iteration 5 - MAPE: 5.87% (Improvement: -0.4%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 35
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+Iteration 6: Iteration 6 - MAPE: 5.19% (Improvement: +0.3%)
+  Features: claude feature engineering
+  Statistical Analysis:
+    • Total features: 55
+    • Significant features (p < 0.05): 0
+    • Highly significant features (p < 0.01): 0
+    • Most significant feature: Feature_0 (p=0.5000)
+
+
+
+
+STATISTICAL INSIGHTS FROM BEST MODEL (MAPE: 5.19%):
+- Most predictive features (lowest p-values): Feature_0 (p=0.5000), Feature_1 (p=0.5000), Feature_2 (p=0.5000), Feature_3 (p=0.5000), Feature_4 (p=0.5000)
+- Least predictive features (highest p-values): Feature_0 (p=0.5000), Feature_1 (p=0.5000), Feature_2 (p=0.5000)
+- Feature significance ratio: 0/55 features are statistically significant
+
+
+
+
+
+
+PREVIOUS ITERATION CODE:
+The following code was used in the most recent iteration (Iteration 6):
+
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction based on statistical insights from previous iterations.
+    
+    Key insights from performance history:
+    - Baseline model (all 62 features) performed best with 27 significant features (p<0.05)
+    - Iteration 3 (50 features) achieved best MAPE of 5.47% but had 0 significant features
+    - Iterations 4 and 5 performed worse with fewer features
+    
+    This implementation:
+    - Returns to a structure closer to the baseline but with more focused financial indicators
+    - Preserves most of the original features that were significant in the baseline
+    - Adds carefully selected technical indicators with strong theoretical basis for short interest prediction
+    - Balances feature count to avoid overfitting while maintaining predictive power
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing financial data
+            - Feature 0: Short interest
+            - Feature 1: Average daily volume
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, 55) with engineered features
+    """
+    # Handle edge cases
+    if data is None or data.size == 0:
+        return np.zeros((0, 55))
+    
+    lookback_window = data.shape[0]
+    
+    # Initialize output array with 55 features
+    # Increasing from previous iterations but still less than original 62
+    # This balances between the baseline (62 features, 27 significant) and Iteration 3 (50 features, best MAPE)
+    output_features = np.zeros((lookback_window, 55))
+    
+    # Process each timestamp independently
+    for t in range(lookback_window):
+        # Extract current timestamp data
+        current_data = np.nan_to_num(data[t], nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]  # Feature_0
+        avg_volume = current_data[1]      # Feature_1
+        
+        # Reshape OHLC data for easier processing
+        ohlc_data = current_data[2:62].reshape(15, 4)  # (15 days, 4 OHLC values)
+        open_prices = ohlc_data[:, 0]
+        high_prices = ohlc_data[:, 1]
+        low_prices = ohlc_data[:, 2]
+        close_prices = ohlc_data[:, 3]
+        
+        # Calculate daily returns
+        daily_returns = np.zeros(len(close_prices)-1)
+        if len(close_prices) > 1:
+            daily_returns = np.diff(close_prices) / (close_prices[:-1] + 1e-8)
+        
+        # 1. PRESERVE ORIGINAL FEATURES - Since baseline had 27 significant features
+        # Keep original short interest and volume
+        output_features[t, 0] = short_interest
+        output_features[t, 1] = avg_volume
+        
+        # Include original OHLC data (most recent 10 days)
+        # This preserves the most relevant original features that were likely significant in baseline
+        for i in range(min(10, len(close_prices))):
+            # Close prices (most important for prediction)
+            output_features[t, 2+i] = close_prices[-(i+1)]
+            
+            # High-Low range (volatility indicator)
+            if i < len(high_prices) and i < len(low_prices):
+                output_features[t, 12+i] = high_prices[-(i+1)] - low_prices[-(i+1)]
+        
+        # 2. SHORT INTEREST DYNAMICS
+        # Days to cover (short interest / avg daily volume) - key metric for short squeeze potential
+        output_features[t, 22] = short_interest / (avg_volume + 1e-8)
+        
+        # Short interest momentum (rate of change)
+        if t > 0 and data[t-1, 0] > 0:
+            output_features[t, 23] = short_interest / data[t-1, 0] - 1
+        
+        # Short interest acceleration (second derivative)
+        if t >= 2 and data[t-1, 0] > 0 and data[t-2, 0] > 0:
+            prev_momentum = data[t-1, 0] / data[t-2, 0] - 1
+            current_momentum = short_interest / data[t-1, 0] - 1
+            output_features[t, 24] = current_momentum - prev_momentum
+        
+        # 3. PRICE ACTION FEATURES
+        if len(close_prices) > 0:
+            # Price ranges at different timeframes (5, 10, 15 days)
+            for i, days in enumerate([5, 10, 15]):
+                if len(close_prices) >= days:
+                    price_range = np.max(high_prices[-days:]) - np.min(low_prices[-days:])
+                    output_features[t, 25+i] = price_range / (np.mean(close_prices[-days:]) + 1e-8)
+            
+            # Price momentum at different timeframes (5, 10, 15 days)
+            for i, days in enumerate([5, 10, 15]):
+                if len(close_prices) >= days:
+                    output_features[t, 28+i] = (close_prices[-1] / close_prices[-days]) - 1
+        
+        # 4. VOLATILITY METRICS
+        # Historical volatility (standard deviation of returns)
+        for i, days in enumerate([5, 10, 15]):
+            if len(daily_returns) >= days:
+                output_features[t, 31+i] = np.std(daily_returns[-days:])
+        
+        # Normalized volatility (volatility relative to price)
+        if len(daily_returns) >= 10 and np.mean(close_prices[-10:]) > 0:
+            output_features[t, 34] = np.std(daily_returns[-10:]) / np.mean(close_prices[-10:])
+        
+        # 5. VOLUME ANALYSIS
+        # Volume trend
+        if t > 0:
+            output_features[t, 35] = avg_volume / (data[t-1, 1] + 1e-8) - 1
+        
+        # Volume relative to price movement (price-volume relationship)
+        if len(close_prices) >= 2:
+            price_change = np.abs(close_prices[-1] - close_prices[-2])
+            output_features[t, 36] = avg_volume * price_change
+        
+        # Volume volatility (standard deviation of volume)
+        if t >= 3:
+            historical_volumes = [data[t-i, 1] for i in range(min(3, t+1))]
+            output_features[t, 37] = np.std(historical_volumes) / (np.mean(historical_volumes) + 1e-8)
+        
+        # 6. TECHNICAL INDICATORS
+        # RSI (Relative Strength Index)
+        if len(daily_returns) >= 14:
+            gains = np.maximum(daily_returns[-14:], 0)
+            losses = np.abs(np.minimum(daily_returns[-14:], 0))
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            if avg_loss > 0:
+                rs = avg_gain / avg_loss
+                output_features[t, 38] = 100 - (100 / (1 + rs))
+            else:
+                output_features[t, 38] = 100
+        
+        # Moving Averages
+        for i, days in enumerate([5, 10, 20]):
+            if len(close_prices) >= days:
+                ma = np.mean(close_prices[-days:])
+                # Price relative to MA
+                output_features[t, 39+i] = close_prices[-1] / ma - 1
+        
+        # MA crossovers
+        if len(close_prices) >= 20:
+            ma5 = np.mean(close_prices[-5:])
+            ma10 = np.mean(close_prices[-10:])
+            ma20 = np.mean(close_prices[-20:])
+            
+            output_features[t, 42] = ma5 / ma10 - 1  # 5-10 crossover
+            output_features[t, 43] = ma5 / ma20 - 1  # 5-20 crossover
+            output_features[t, 44] = ma10 / ma20 - 1  # 10-20 crossover
+        
+        # 7. SHORT SQUEEZE POTENTIAL METRICS
+        # Short squeeze potential (high short interest + positive momentum + high volume)
+        if len(close_prices) >= 5:
+            price_momentum = (close_prices[-1] / close_prices[-5]) - 1
+            if t > 0:
+                volume_surge = avg_volume / (data[t-1, 1] + 1e-8)
+                # Squeeze potential formula
+                squeeze_potential = short_interest * max(0, price_momentum) * max(1, volume_surge)
+                output_features[t, 45] = squeeze_potential
+        
+        # 8. TREND ANALYSIS
+        if len(close_prices) >= 10:
+            x = np.arange(len(close_prices[-10:]))
+            slope, intercept = np.polyfit(x, close_prices[-10:], 1)
+            
+            # Trend direction and strength
+            output_features[t, 46] = slope / (np.mean(close_prices[-10:]) + 1e-8)
+            
+            # R-squared of trend line (trend consistency)
+            y_pred = slope * x + intercept
+            ss_tot = np.sum((close_prices[-10:] - np.mean(close_prices[-10:]))**2)
+            ss_res = np.sum((close_prices[-10:] - y_pred)**2)
+            if ss_tot > 0:
+                output_features[t, 47] = 1 - (ss_res / ss_tot)
+        
+        # 9. COMBINED FEATURES - Key interactions between metrics
+        # Short interest * volatility interaction
+        if len(daily_returns) >= 5:
+            volatility = np.std(daily_returns[-5:])
+            output_features[t, 48] = short_interest * volatility
+        
+        # Short interest * volume interaction
+        output_features[t, 49] = short_interest * avg_volume
+        
+        # Short interest * price momentum interaction
+        if len(close_prices) >= 5:
+            price_momentum = (close_prices[-1] / close_prices[-5]) - 1
+            output_features[t, 50] = short_interest * price_momentum
+        
+        # 10. ADVANCED INDICATORS
+        # VWAP (Volume Weighted Average Price) - last 5 days
+        if len(close_prices) >= 5:
+            # Simulate volume with avg_volume for each day
+            vwap = np.sum(close_prices[-5:] * avg_volume) / (5 * avg_volume + 1e-8)
+            output_features[t, 51] = close_prices[-1] / vwap - 1
+        
+        # Bollinger Bands
+        if len(close_prices) >= 20:
+            ma20 = np.mean(close_prices[-20:])
+            std20 = np.std(close_prices[-20:])
+            
+            # Distance from upper and lower bands (normalized)
+            upper_band = ma20 + 2 * std20
+            lower_band = ma20 - 2 * std20
+            
+            # Position within bands (0 = lower band, 1 = upper band)
+            band_width = upper_band - lower_band
+            if band_width > 0:
+                output_features[t, 52] = (close_prices[-1] - lower_band) / band_width
+            
+            # Bollinger Band width (volatility indicator)
+            output_features[t, 53] = band_width / ma20
+        
+        # 11. HISTORICAL SHORT INTEREST PATTERNS
+        # Short interest relative to historical average
+        if t >= 3:
+            historical_si = []
+            for i in range(min(3, t)):
+                if t-i-1 >= 0:
+                    historical_si.append(data[t-i-1, 0])
+            
+            if historical_si:
+                avg_historical_si = np.mean(historical_si)
+                if avg_historical_si > 0:
+                    output_features[t, 54] = short_interest / avg_historical_si
+    
+    # Handle any NaN values that might have been created
+    output_features = np.nan_to_num(output_features, nan=0.0)
+    
+    return output_features
+```
+
+Performance of this code: MAPE = 5.19%
+Improvement over previous: +0.28%
+Statistical Analysis: 0/55 features were significant (p < 0.05), 0 were highly significant (p < 0.01)
+
+INSTRUCTIONS FOR NEW CODE:
+- Analyze the previous code and understand what features it tried to create
+- Identify what worked well and what didn't work based on performance and statistical significance
+- If the previous code worked but had poor performance, try different feature engineering approaches
+- Consider the statistical significance of features - focus on creating features that are likely to be statistically significant
+- Your new code should be an improvement over the previous attempt
+- Think about what additional financial insights or technical indicators could be valuable
+
+
+CURRENT TASK (Iteration 7):
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 5.19%.
+
+Based on the performance history, statistical analysis, and previous code above, analyze what worked and what didn't, then create a new feature engineering approach that:
+1. Learns from previous iterations' successes and failures
+2. Analyzes the previous code to understand what features were attempted and their effectiveness
+3. Builds upon successful feature patterns while avoiding problematic approaches
+4. Considers financial domain knowledge (momentum, volatility, volume patterns, etc.)
+5. Maintains LSTM-compatible time series structure
+6. Uses p-value insights to prioritize feature construction
+7. Improves upon the previous iteration's approach
+
+Requirements:
+1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features)
+2. The function should process each timestamp independently but maintain the temporal structure
+3. Focus on the most predictive features for each time step, using statistical significance as guidance
+4. Consider financial domain knowledge (e.g., price momentum, volatility, volume patterns, etc.)
+5. The output should be a 2D numpy array with shape (lookback_window, constructed_features)
+6. Include comments explaining your feature engineering choices and how they address previous performance issues and statistical insights
+7. Make sure the code is production-ready and handles edge cases
+8. DO NOT include any import statements - only use numpy (available as 'np') and built-in Python functions
+9. The function must return a 2D array where each row represents features for one time step
+10. Use numpy nan_to_num to handle NaN values
+11. Analyze the previous iteration's code and explain in comments how your approach differs and improves upon it
+
+Please provide ONLY the Python function code, no explanations outside the code comments.
+
+Feature description: Stock short interest prediction with past short interest, volume, and OHLC data for iterative improvement
