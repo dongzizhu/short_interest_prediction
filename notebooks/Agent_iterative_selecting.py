@@ -867,7 +867,7 @@ def load_data_from_parquet_and_construct_features(stock, parquet_path='../data/p
 def main():
     """Main function to run the iterative agent-based feature selection"""
     # Configuration
-    ANTHROPIC_API_KEY = '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'  # Replace with your actual API key
+    ANTHROPIC_API_KEY = ''  # Replace with your actual API key
     stock = 'TSLA'
     
     print("🚀 Starting Iterative Agent-Based Feature Selection Process")

@@ -1739,7 +1739,7 @@ def generate_performance_report(results, successful_tickers, failed_tickers):
 def main():
     """Main function to run the iterative agent-based feature selection for multiple tickers"""
     # Configuration
-    ANTHROPIC_API_KEY = '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'  # Replace with your actual API key
+    ANTHROPIC_API_KEY = ''  # Replace with your actual API key
     
     # Get available tickers from parquet file (first 10 for debugging)
     all_available_tickers = get_available_tickers(max_tickers=10)
