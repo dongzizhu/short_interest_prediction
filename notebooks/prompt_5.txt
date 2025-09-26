@@ -13,37 +13,37 @@ Total: 1 + 1 + 60 = 62 features(dimensions) per timestamp.
 
 
 PERFORMANCE HISTORY:
-Iteration 0: Baseline - MAPE: 6.87%
+Iteration 0: Baseline - MAPE: 17.25%
   Features: All 62 original features
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_35 (importance=0.0001), Feature_0 (importance=0.0001), Feature_12 (importance=0.0001), Feature_26 (importance=0.0000), Feature_1 (importance=0.0000)
+    • Top important features: Feature_1 (importance=0.0003), Feature_48 (importance=0.0003), Feature_40 (importance=0.0003), Feature_27 (importance=0.0002), Feature_10 (importance=0.0002)
 
-Iteration 1: Iteration 1 - MAPE: 8.25% (Improvement: -1.4%)
+Iteration 1: Iteration 1 - MAPE: 18.14% (Improvement: -0.9%)
   Features: claude feature engineering
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_97 (importance=0.0010), Feature_98 (importance=0.0006), Feature_66 (importance=0.0002), Feature_12 (importance=0.0002), Feature_145 (importance=0.0002)
+    • Top important features: Feature_8 (importance=0.0238), Feature_16 (importance=0.0194), Feature_13 (importance=0.0135), Feature_11 (importance=0.0102), Feature_7 (importance=0.0082)
 
-Iteration 2: Iteration 2 - MAPE: 8.67% (Improvement: -1.8%)
+Iteration 2: Iteration 2 - MAPE: 13.23% (Improvement: +4.0%)
   Features: claude feature engineering
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_22 (importance=0.0017), Feature_23 (importance=0.0013), Feature_113 (importance=0.0005), Feature_43 (importance=0.0005), Feature_8 (importance=0.0005)
+    • Top important features: Feature_23 (importance=0.0243), Feature_14 (importance=0.0124), Feature_10 (importance=0.0106), Feature_17 (importance=0.0074), Feature_0 (importance=0.0071)
 
-Iteration 3: Iteration 3 - MAPE: 10.57% (Improvement: -3.7%)
+Iteration 3: Iteration 3 - MAPE: 16.37% (Improvement: -3.1%)
   Features: claude feature engineering
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_71 (importance=0.0033), Feature_77 (importance=0.0027), Feature_82 (importance=0.0016), Feature_69 (importance=0.0016), Feature_78 (importance=0.0011)
+    • Top important features: Feature_35 (importance=0.0061), Feature_7 (importance=0.0057), Feature_30 (importance=0.0053), Feature_12 (importance=0.0051), Feature_41 (importance=0.0039)
 
-Iteration 4: Iteration 4 - MAPE: 9.63% (Improvement: -2.8%)
+Iteration 4: Iteration 4 - MAPE: 22.22% (Improvement: -9.0%)
   Features: claude feature engineering
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_67 (importance=0.0025), Feature_51 (importance=0.0014), Feature_79 (importance=0.0010), Feature_0 (importance=0.0010), Feature_77 (importance=0.0009)
+    • Top important features: Feature_10 (importance=0.0042), Feature_25 (importance=0.0028), Feature_21 (importance=0.0027), Feature_91 (importance=0.0022), Feature_64 (importance=0.0021)
 
 
 
 
-DL-BASED FEATURE IMPORTANCE INSIGHTS FROM BEST MODEL (MAPE: 6.87%):
-- Most important features: Feature_35 (importance=0.0001), Feature_0 (importance=0.0001), Feature_12 (importance=0.0001), Feature_26 (importance=0.0000), Feature_1 (importance=0.0000)
-- Least important features: Feature_52 (importance=-0.0000), Feature_47 (importance=-0.0000), Feature_14 (importance=-0.0000)
+DL-BASED FEATURE IMPORTANCE INSIGHTS FROM BEST MODEL (MAPE: 13.23%):
+- Most important features: Feature_23 (importance=0.0243), Feature_14 (importance=0.0124), Feature_10 (importance=0.0106), Feature_17 (importance=0.0074), Feature_0 (importance=0.0071)
+- Least important features: Feature_5 (importance=0.0003), Feature_15 (importance=0.0009), Feature_7 (importance=0.0011)
 
 
 
@@ -56,215 +56,457 @@ The following code was used in the most recent iteration (Iteration 4):
 ```python
 def construct_features(data):
     """
-    Constructs engineered features for short interest prediction.
+    Constructs features for short interest prediction based on historical performance analysis.
     
     Args:
         data: numpy array of shape (lookback_window, 62)
-              where data[:, 0] = short interest
-                    data[:, 1] = average daily volume
-                    data[:, 2:62] = OHLC prices for past 15 days (4 features × 15 days)
+            - data[:, 0]: Short interest
+            - data[:, 1]: Average daily volume
+            - data[:, 2:62]: OHLC prices for past 15 days (4 features × 15 days)
     
     Returns:
         numpy array of shape (lookback_window, constructed_features)
     """
+    # Ensure we have the correct input shape
+    if len(data.shape) != 2 or data.shape[1] != 62:
+        # Handle error gracefully - return empty array with correct dimensions
+        return np.zeros((data.shape[0], 1))
+    
     lookback_window = data.shape[0]
     
     # Handle NaN values
     data = np.nan_to_num(data, nan=0.0)
     
     # Extract key components
-    short_interest = data[:, 0:1]  # Feature_0 was identified as important
-    avg_volume = data[:, 1:2]
+    short_interest = data[:, 0]
+    avg_volume = data[:, 1]
     
-    # Reshape OHLC data for easier manipulation
-    # Each day has 4 values (OHLC), and we have 15 days of data
-    ohlc_data = data[:, 2:62].reshape(lookback_window, 15, 4)
+    # Reshape OHLC data for easier processing
+    # Original format: 60 columns (4 OHLC × 15 days flattened)
+    # New format: (lookback_window, 15, 4) where 4 is OHLC
+    ohlc_data = np.zeros((lookback_window, 15, 4))
+    for i in range(15):
+        ohlc_data[:, i, 0] = data[:, 2 + i*4]     # Open
+        ohlc_data[:, i, 1] = data[:, 2 + i*4 + 1] # High
+        ohlc_data[:, i, 2] = data[:, 2 + i*4 + 2] # Low
+        ohlc_data[:, i, 3] = data[:, 2 + i*4 + 3] # Close
     
-    # Extract OHLC components
-    open_prices = ohlc_data[:, :, 0]
-    high_prices = ohlc_data[:, :, 1]
-    low_prices = ohlc_data[:, :, 2]
-    close_prices = ohlc_data[:, :, 3]
+    # Initialize feature list
+    feature_list = []
     
-    # Initialize list to store all features
-    all_features = []
+    # Extract price data for easier access
+    close_prices = ohlc_data[:, :, 3]  # All close prices
+    open_prices = ohlc_data[:, :, 0]   # All open prices
+    high_prices = ohlc_data[:, :, 1]   # All high prices
+    low_prices = ohlc_data[:, :, 2]    # All low prices
     
-    # ANALYSIS: The baseline model (6.87% MAPE) outperformed all subsequent iterations.
-    # This suggests we should keep the original features and be very selective with transformations.
-    # Feature_35, Feature_0, Feature_12, Feature_26, Feature_1 were most important in baseline.
+    # -------------------------------------------------------------------------
+    # 1. CORE FEATURES - Based on DL importance analysis from best model (13.23% MAPE)
+    # -------------------------------------------------------------------------
     
-    # 1. Keep ALL original features - they performed best in baseline
-    all_features.append(data)  # All original 62 features
+    # Feature_0: Short interest itself (consistently important across iterations)
+    feature_list.append(short_interest.reshape(lookback_window, 1))
     
-    # 2. Focus on Feature_35 (High price of 9th day)
-    # Feature_35 is at index 35-2=33 in the OHLC data (after removing SI and volume)
-    # 33 // 4 = 8, 33 % 4 = 1, so it's the High price of the 9th day (0-indexed)
-    feature_35 = high_prices[:, 8:9]
+    # Feature_23: 6th day's Close price (most important in best model)
+    # This is index 5, feature 3 in our reshaped data
+    feature_list.append(ohlc_data[:, 5, 3].reshape(lookback_window, 1))
     
-    # 3. Focus on Feature_12 (Low price of 3rd day)
-    # 10 // 4 = 2, 10 % 4 = 2, so it's the Low price of the 3rd day (0-indexed)
-    feature_12 = low_prices[:, 2:3]
+    # Feature_14: 4th day's Low price (2nd most important in best model)
+    feature_list.append(ohlc_data[:, 3, 2].reshape(lookback_window, 1))
     
-    # 4. Focus on Feature_26 (Open price of 7th day)
-    # 24 // 4 = 6, 24 % 4 = 0, so it's the Open price of the 7th day (0-indexed)
-    feature_26 = open_prices[:, 6:7]
+    # Feature_10: 3rd day's Low price (3rd most important in best model)
+    feature_list.append(ohlc_data[:, 2, 2].reshape(lookback_window, 1))
     
-    # 5. Add minimal transformations of the most important features
-    # Instead of complex transformations, we'll focus on simple, financially meaningful ones
+    # Feature_17: 5th day's Low price (4th most important in best model)
+    feature_list.append(ohlc_data[:, 4, 2].reshape(lookback_window, 1))
     
-    # Relative price changes for important features (percentage change)
-    f35_pct_change = np.zeros((lookback_window, 1))
-    f12_pct_change = np.zeros((lookback_window, 1))
-    f26_pct_change = np.zeros((lookback_window, 1))
+    # Feature_7: 2nd day's High price (important in iteration 1 and 3)
+    feature_list.append(ohlc_data[:, 1, 1].reshape(lookback_window, 1))
     
-    for i in range(1, lookback_window):
-        if feature_35[i-1, 0] != 0:
-            f35_pct_change[i, 0] = (feature_35[i, 0] - feature_35[i-1, 0]) / feature_35[i-1, 0]
-        if feature_12[i-1, 0] != 0:
-            f12_pct_change[i, 0] = (feature_12[i, 0] - feature_12[i-1, 0]) / feature_12[i-1, 0]
-        if feature_26[i-1, 0] != 0:
-            f26_pct_change[i, 0] = (feature_26[i, 0] - feature_26[i-1, 0]) / feature_26[i-1, 0]
+    # Feature_8: 2nd day's Low price (most important in iteration 1)
+    feature_list.append(ohlc_data[:, 1, 2].reshape(lookback_window, 1))
     
-    all_features.append(f35_pct_change)
-    all_features.append(f12_pct_change)
-    all_features.append(f26_pct_change)
+    # Feature_35: 9th day's High price (most important in iteration 3)
+    feature_list.append(ohlc_data[:, 8, 1].reshape(lookback_window, 1))
     
-    # 6. Short interest features - simple and focused
-    # Short interest relative change
-    si_pct_change = np.zeros((lookback_window, 1))
-    for i in range(1, lookback_window):
-        if short_interest[i-1, 0] != 0:
-            si_pct_change[i, 0] = (short_interest[i, 0] - short_interest[i-1, 0]) / short_interest[i-1, 0]
+    # -------------------------------------------------------------------------
+    # 2. SHORT INTEREST FEATURES - Refined based on previous iterations
+    # -------------------------------------------------------------------------
     
-    all_features.append(si_pct_change)
+    # Short interest momentum (rate of change)
+    si_momentum_1 = np.zeros((lookback_window, 1))
+    si_momentum_1[1:, 0] = (short_interest[1:] - short_interest[:-1]) / (short_interest[:-1] + 1e-8)
+    feature_list.append(si_momentum_1)
     
-    # 7. Volume features - simple and focused
-    # Volume relative change
-    vol_pct_change = np.zeros((lookback_window, 1))
-    for i in range(1, lookback_window):
-        if avg_volume[i-1, 0] != 0:
-            vol_pct_change[i, 0] = (avg_volume[i, 0] - avg_volume[i-1, 0]) / avg_volume[i-1, 0]
+    # Short interest acceleration (2nd derivative) - smoothed version
+    si_accel = np.zeros((lookback_window, 1))
+    if lookback_window > 2:
+        si_accel[2:, 0] = (si_momentum_1[2:, 0] - si_momentum_1[1:-1, 0])
+        # Apply smoothing to reduce noise
+        alpha = 0.7
+        for i in range(3, lookback_window):
+            si_accel[i, 0] = alpha * si_accel[i, 0] + (1-alpha) * si_accel[i-1, 0]
+    feature_list.append(si_accel)
     
-    all_features.append(vol_pct_change)
-    
-    # 8. Normalized short interest to volume ratio
-    # This can be a key indicator for potential short squeezes
-    si_to_volume = short_interest / (avg_volume + 1e-8)
-    all_features.append(si_to_volume)
-    
-    # 9. Add minimal interaction terms between important features
-    # Interaction between short interest and Feature_35
-    si_f35_interaction = short_interest * feature_35
-    all_features.append(si_f35_interaction)
-    
-    # 10. Add minimal non-linear transformations of important features
-    # Log transformation of short interest (to capture diminishing returns)
-    log_si = np.log1p(short_interest)
-    all_features.append(log_si)
-    
-    # 11. Add simple volatility measures for the important days
-    # Days of interest (0-indexed): 3rd day (2), 7th day (6), 9th day (8)
-    days_of_interest = [2, 6, 8]
-    
-    for day in days_of_interest:
-        # Daily true range - a measure of volatility
-        tr = np.zeros((lookback_window, 1))
+    # Short interest relative to its moving average
+    # Using only window=2 which was most effective in previous iterations
+    if lookback_window >= 2:
+        si_ma = np.zeros((lookback_window, 1))
         for i in range(lookback_window):
-            high_low = high_prices[i, day] - low_prices[i, day]
-            if day > 0:
-                high_close_prev = np.abs(high_prices[i, day] - close_prices[i, day-1])
-                low_close_prev = np.abs(low_prices[i, day] - close_prices[i, day-1])
-                tr[i, 0] = np.max([high_low, high_close_prev, low_close_prev])
-            else:
-                tr[i, 0] = high_low
-        
-        # Normalize by close price to get relative volatility
-        rel_tr = tr / (close_prices[:, day:day+1] + 1e-8)
-        all_features.append(rel_tr)
+            start_idx = max(0, i-1)  # 2-day window
+            si_ma[i, 0] = np.mean(short_interest[start_idx:i+1])
+        si_relative_to_ma = short_interest.reshape(lookback_window, 1) / (si_ma + 1e-8)
+        feature_list.append(si_relative_to_ma)
     
-    # 12. Add simple price momentum indicators for important days
-    for day in days_of_interest:
-        # Rate of change (ROC) - momentum indicator
-        roc = np.zeros((lookback_window, 1))
-        for i in range(lookback_window):
-            if day > 0:
-                if close_prices[i, day-1] != 0:
-                    roc[i, 0] = (close_prices[i, day] - close_prices[i, day-1]) / close_prices[i, day-1]
-        all_features.append(roc)
+    # Short interest z-score (standardized)
+    if lookback_window > 1:
+        si_mean = np.mean(short_interest)
+        si_std = np.std(short_interest) if lookback_window > 1 else 1.0
+        si_zscore = (short_interest - si_mean) / (si_std + 1e-8)
+        feature_list.append(si_zscore.reshape(lookback_window, 1))
     
-    # 13. Add simple moving averages for important days
-    for day in days_of_interest:
-        # 3-day simple moving average
-        ma3 = np.zeros((lookback_window, 1))
-        for i in range(lookback_window):
-            start_idx = max(0, day - 2)
-            ma3[i, 0] = np.mean(close_prices[i, start_idx:day+1])
-        
-        # Price relative to moving average
-        price_to_ma = close_prices[:, day:day+1] / (ma3 + 1e-8)
-        all_features.append(price_to_ma)
+    # -------------------------------------------------------------------------
+    # 3. VOLUME FEATURES - Refined based on previous iterations
+    # -------------------------------------------------------------------------
     
-    # 14. Add simple relative strength indicators for important days
-    for day in days_of_interest:
-        # Simple RSI calculation (simplified)
-        rsi = np.zeros((lookback_window, 1))
+    # Log-transformed volume (better for skewed distributions)
+    log_volume = np.log1p(avg_volume)
+    feature_list.append(log_volume.reshape(lookback_window, 1))
+    
+    # Volume momentum with smoothing
+    vol_momentum = np.zeros((lookback_window, 1))
+    vol_momentum[1:, 0] = (avg_volume[1:] - avg_volume[:-1]) / (avg_volume[:-1] + 1e-8)
+    # Apply exponential smoothing to volume momentum
+    if lookback_window > 1:
+        alpha = 0.7  # Smoothing factor
         for i in range(1, lookback_window):
+            vol_momentum[i, 0] = alpha * vol_momentum[i, 0] + (1-alpha) * vol_momentum[i-1, 0]
+    feature_list.append(vol_momentum)
+    
+    # -------------------------------------------------------------------------
+    # 4. SHORT INTEREST TO VOLUME RELATIONSHIPS
+    # -------------------------------------------------------------------------
+    
+    # Days to cover ratio (short interest / average daily volume)
+    days_to_cover = short_interest / (avg_volume + 1e-8)
+    feature_list.append(days_to_cover.reshape(lookback_window, 1))
+    
+    # Log-transformed days to cover
+    log_days_to_cover = np.log1p(days_to_cover)
+    feature_list.append(log_days_to_cover.reshape(lookback_window, 1))
+    
+    # Days to cover momentum
+    dtc_momentum = np.zeros((lookback_window, 1))
+    dtc_momentum[1:, 0] = (days_to_cover[1:] - days_to_cover[:-1]) / (days_to_cover[:-1] + 1e-8)
+    feature_list.append(dtc_momentum)
+    
+    # -------------------------------------------------------------------------
+    # 5. PRICE FEATURES - Focused on important days identified by feature importance
+    # -------------------------------------------------------------------------
+    
+    # Important days based on feature importance analysis
+    # Days 3, 4, 5, 6, 2, 9 were important (indices 2, 3, 4, 5, 1, 8)
+    important_days = [1, 2, 3, 4, 5, 8]
+    
+    # Calculate returns for each day
+    returns = np.zeros((lookback_window, 15))
+    for i in range(15):
+        if i > 0:
+            returns[:, i] = (close_prices[:, i] - close_prices[:, i-1]) / (close_prices[:, i-1] + 1e-8)
+    
+    # For each important day, create specialized features
+    for day_idx in important_days:
+        # Daily range (normalized by opening price)
+        daily_range = (high_prices[:, day_idx] - low_prices[:, day_idx]) / (open_prices[:, day_idx] + 1e-8)
+        feature_list.append(daily_range.reshape(lookback_window, 1))
+        
+        # Daily return
+        if day_idx > 0:
+            daily_return = returns[:, day_idx]
+            feature_list.append(daily_return.reshape(lookback_window, 1))
+        
+        # Intraday movement pattern
+        intraday_move = (close_prices[:, day_idx] - open_prices[:, day_idx]) / (open_prices[:, day_idx] + 1e-8)
+        feature_list.append(intraday_move.reshape(lookback_window, 1))
+        
+        # True Range - accounts for gaps between days
+        true_range = np.zeros(lookback_window)
+        if day_idx > 0:
+            for i in range(lookback_window):
+                # True range is max of: high-low, |high-prev_close|, |low-prev_close|
+                tr1 = high_prices[i, day_idx] - low_prices[i, day_idx]
+                tr2 = abs(high_prices[i, day_idx] - close_prices[i, day_idx-1])
+                tr3 = abs(low_prices[i, day_idx] - close_prices[i, day_idx-1])
+                true_range[i] = max(tr1, tr2, tr3)
+            # Normalize by previous close
+            true_range = true_range / (close_prices[:, day_idx-1] + 1e-8)
+        feature_list.append(true_range.reshape(lookback_window, 1))
+        
+        # Price position within range
+        price_position = (close_prices[:, day_idx] - low_prices[:, day_idx]) / (high_prices[:, day_idx] - low_prices[:, day_idx] + 1e-8)
+        feature_list.append(price_position.reshape(lookback_window, 1))
+    
+    # -------------------------------------------------------------------------
+    # 6. TECHNICAL INDICATORS - Focused on important days
+    # -------------------------------------------------------------------------
+    
+    # RSI-like indicator for important days
+    for day_idx in important_days:
+        if day_idx >= 13:  # Need 14 days for traditional RSI
+            continue
+            
+        # Calculate gains and losses over 5-day window ending on this day
+        window_size = min(5, day_idx+1)
+        gains = np.zeros((lookback_window, window_size))
+        losses = np.zeros((lookback_window, window_size))
+        
+        for w in range(window_size):
+            day = day_idx - w
             if day > 0:
-                gain = max(0, close_prices[i, day] - close_prices[i, day-1])
-                loss = max(0, close_prices[i, day-1] - close_prices[i, day])
-                if gain + loss > 0:
-                    rsi[i, 0] = gain / (gain + loss)
-        all_features.append(rsi)
+                daily_change = returns[:, day]
+                gains[:, w] = np.maximum(0, daily_change)
+                losses[:, w] = np.maximum(0, -daily_change)
+        
+        avg_gain = np.mean(gains, axis=1)
+        avg_loss = np.mean(losses, axis=1)
+        
+        # Calculate RSI
+        rs = avg_gain / (avg_loss + 1e-8)
+        rsi = 100 - (100 / (1 + rs))
+        feature_list.append(rsi.reshape(lookback_window, 1))
     
-    # 15. Add simple trend indicators
-    # Linear regression slope for short interest
-    si_slope = np.zeros((lookback_window, 1))
-    for i in range(3, lookback_window):
-        y = short_interest[i-3:i+1, 0]
-        x = np.arange(4)
-        # Simple linear regression slope calculation
-        si_slope[i, 0] = np.sum((x - np.mean(x)) * (y - np.mean(y))) / (np.sum((x - np.mean(x))**2) + 1e-8)
-    all_features.append(si_slope)
+    # -------------------------------------------------------------------------
+    # 7. VOLATILITY FEATURES
+    # -------------------------------------------------------------------------
     
-    # 16. Add simple statistical features
-    # Z-score of short interest (how many standard deviations from mean)
-    si_zscore = np.zeros((lookback_window, 1))
-    for i in range(3, lookback_window):
-        window = short_interest[i-3:i+1, 0]
-        mean = np.mean(window)
-        std = np.std(window)
-        if std > 0:
-            si_zscore[i, 0] = (short_interest[i, 0] - mean) / std
-    all_features.append(si_zscore)
+    # Calculate volatility over different windows for important days
+    # Using only 5-day window which was most effective in previous iterations
+    window_size = 5
+    if 15 >= window_size:
+        # Calculate rolling volatility
+        rolling_vol = np.zeros(lookback_window)
+        for i in range(lookback_window):
+            # Use the last 'window_size' days of returns
+            window_returns = returns[i, max(0, 15-window_size):15]
+            if len(window_returns) > 1:
+                rolling_vol[i] = np.std(window_returns)
+        feature_list.append(rolling_vol.reshape(lookback_window, 1))
     
-    # 17. Add simple ratio features
-    # High-Low ratio for important days
-    for day in days_of_interest:
-        hl_ratio = high_prices[:, day:day+1] / (low_prices[:, day:day+1] + 1e-8)
-        all_features.append(hl_ratio)
+    # -------------------------------------------------------------------------
+    # 8. BOLLINGER BANDS FOR SHORT INTEREST
+    # -------------------------------------------------------------------------
     
-    # 18. Add simple distance features
-    # Distance from short interest to its moving average
-    si_ma3 = np.zeros((lookback_window, 1))
-    for i in range(lookback_window):
-        start_idx = max(0, i - 2)
-        si_ma3[i, 0] = np.mean(short_interest[start_idx:i+1, 0])
+    if lookback_window > 1:
+        # Calculate rolling mean and std of short interest
+        window_size = min(lookback_window, 4)  # Use up to 4 previous points
+        si_mean = np.zeros(lookback_window)
+        si_std = np.zeros(lookback_window)
+        
+        for i in range(lookback_window):
+            start_idx = max(0, i-window_size+1)
+            si_window = short_interest[start_idx:i+1]
+            si_mean[i] = np.mean(si_window)
+            si_std[i] = np.std(si_window) if len(si_window) > 1 else 0
+        
+        # Calculate Bollinger Band positions
+        bb_position = (short_interest - si_mean) / (si_std + 1e-8)
+        feature_list.append(bb_position.reshape(lookback_window, 1))
+        
+        # Bollinger Band width (volatility indicator)
+        bb_width = 2 * si_std / (si_mean + 1e-8)
+        feature_list.append(bb_width.reshape(lookback_window, 1))
     
-    si_distance_to_ma = (short_interest - si_ma3) / (si_ma3 + 1e-8)
-    all_features.append(si_distance_to_ma)
+    # -------------------------------------------------------------------------
+    # 9. CROSS-ASSET RELATIONSHIPS
+    # -------------------------------------------------------------------------
     
-    # Concatenate all features
-    result = np.concatenate([feat.reshape(lookback_window, -1) for feat in all_features], axis=1)
+    # Short interest to price ratio for important days
+    for day_idx in important_days:
+        si_price_ratio = short_interest / (close_prices[:, day_idx] + 1e-8)
+        feature_list.append(si_price_ratio.reshape(lookback_window, 1))
+    
+    # -------------------------------------------------------------------------
+    # 10. NEW: PRICE PATTERN RECOGNITION
+    # -------------------------------------------------------------------------
+    
+    # Identify potential reversal patterns in important days
+    for day_idx in important_days:
+        if day_idx > 1:  # Need at least 3 days for pattern
+            # Bullish engulfing pattern
+            bullish_engulfing = np.zeros(lookback_window)
+            for i in range(lookback_window):
+                # Previous day was bearish (close < open)
+                prev_bearish = close_prices[i, day_idx-1] < open_prices[i, day_idx-1]
+                # Current day is bullish (close > open)
+                curr_bullish = close_prices[i, day_idx] > open_prices[i, day_idx]
+                # Current day's body engulfs previous day's body
+                curr_open_lower = open_prices[i, day_idx] < close_prices[i, day_idx-1]
+                curr_close_higher = close_prices[i, day_idx] > open_prices[i, day_idx-1]
+                
+                if prev_bearish and curr_bullish and curr_open_lower and curr_close_higher:
+                    bullish_engulfing[i] = 1
+            feature_list.append(bullish_engulfing.reshape(lookback_window, 1))
+            
+            # Bearish engulfing pattern
+            bearish_engulfing = np.zeros(lookback_window)
+            for i in range(lookback_window):
+                # Previous day was bullish (close > open)
+                prev_bullish = close_prices[i, day_idx-1] > open_prices[i, day_idx-1]
+                # Current day is bearish (close < open)
+                curr_bearish = close_prices[i, day_idx] < open_prices[i, day_idx]
+                # Current day's body engulfs previous day's body
+                curr_open_higher = open_prices[i, day_idx] > close_prices[i, day_idx-1]
+                curr_close_lower = close_prices[i, day_idx] < open_prices[i, day_idx-1]
+                
+                if prev_bullish and curr_bearish and curr_open_higher and curr_close_lower:
+                    bearish_engulfing[i] = 1
+            feature_list.append(bearish_engulfing.reshape(lookback_window, 1))
+            
+            # Doji pattern (open and close are very close)
+            doji = np.zeros(lookback_window)
+            for i in range(lookback_window):
+                body_size = abs(close_prices[i, day_idx] - open_prices[i, day_idx])
+                range_size = high_prices[i, day_idx] - low_prices[i, day_idx]
+                if range_size > 0 and body_size / range_size < 0.1:  # Body is less than 10% of range
+                    doji[i] = 1
+            feature_list.append(doji.reshape(lookback_window, 1))
+    
+    # -------------------------------------------------------------------------
+    # 11. NEW: MOMENTUM OSCILLATORS
+    # -------------------------------------------------------------------------
+    
+    # Stochastic oscillator for important days
+    for day_idx in important_days:
+        if day_idx >= 5:  # Need at least 5 days of data
+            # Calculate %K (current close relative to high/low range over lookback period)
+            k_period = 5  # Standard is 14, but we use 5 for limited data
+            stoch_k = np.zeros(lookback_window)
+            
+            for i in range(lookback_window):
+                # Find highest high and lowest low in the period
+                period_high = np.max(high_prices[i, day_idx-k_period+1:day_idx+1])
+                period_low = np.min(low_prices[i, day_idx-k_period+1:day_idx+1])
+                
+                # Calculate %K
+                if period_high != period_low:
+                    stoch_k[i] = 100 * (close_prices[i, day_idx] - period_low) / (period_high - period_low)
+                else:
+                    stoch_k[i] = 50  # Default to middle if range is zero
+            
+            feature_list.append(stoch_k.reshape(lookback_window, 1))
+            
+            # Calculate %D (3-day SMA of %K)
+            stoch_d = np.zeros(lookback_window)
+            if day_idx >= 7:  # Need additional days for the moving average
+                for i in range(lookback_window):
+                    # Calculate %K for previous days
+                    k_values = np.zeros(3)
+                    for j in range(3):
+                        day = day_idx - j
+                        period_high = np.max(high_prices[i, day-k_period+1:day+1])
+                        period_low = np.min(low_prices[i, day-k_period+1:day+1])
+                        
+                        if period_high != period_low:
+                            k_values[j] = 100 * (close_prices[i, day] - period_low) / (period_high - period_low)
+                        else:
+                            k_values[j] = 50
+                    
+                    stoch_d[i] = np.mean(k_values)
+                
+                feature_list.append(stoch_d.reshape(lookback_window, 1))
+    
+    # -------------------------------------------------------------------------
+    # 12. NEW: VOLUME-PRICE RELATIONSHIP
+    # -------------------------------------------------------------------------
+    
+    # On-Balance Volume (OBV) concept applied to short interest
+    obv = np.zeros(lookback_window)
+    for day_idx in important_days:
+        if day_idx > 0:
+            for i in range(lookback_window):
+                if close_prices[i, day_idx] > close_prices[i, day_idx-1]:
+                    # Price up, add volume
+                    obv[i] += avg_volume[i]
+                elif close_prices[i, day_idx] < close_prices[i, day_idx-1]:
+                    # Price down, subtract volume
+                    obv[i] -= avg_volume[i]
+    
+    # Normalize OBV
+    if np.max(np.abs(obv)) > 0:
+        obv = obv / np.max(np.abs(obv))
+    feature_list.append(obv.reshape(lookback_window, 1))
+    
+    # Volume-weighted average price (VWAP) concept
+    for day_idx in important_days:
+        vwap = np.zeros(lookback_window)
+        for i in range(lookback_window):
+            # Typical price = (high + low + close) / 3
+            typical_price = (high_prices[i, day_idx] + low_prices[i, day_idx] + close_prices[i, day_idx]) / 3
+            vwap[i] = typical_price
+        feature_list.append(vwap.reshape(lookback_window, 1))
+    
+    # -------------------------------------------------------------------------
+    # 13. NEW: INTERACTION FEATURES
+    # -------------------------------------------------------------------------
+    
+    # Interaction between short interest and volume
+    si_vol_interaction = short_interest * log_volume
+    feature_list.append(si_vol_interaction.reshape(lookback_window, 1))
+    
+    # Interaction between short interest momentum and price momentum
+    for day_idx in important_days:
+        if day_idx > 0:
+            price_momentum = returns[:, day_idx]
+            interaction = si_momentum_1[:, 0] * price_momentum
+            feature_list.append(interaction.reshape(lookback_window, 1))
+    
+    # -------------------------------------------------------------------------
+    # 14. NEW: NONLINEAR TRANSFORMATIONS
+    # -------------------------------------------------------------------------
+    
+    # Square root of short interest (reduces impact of outliers)
+    sqrt_si = np.sqrt(np.abs(short_interest))
+    feature_list.append(sqrt_si.reshape(lookback_window, 1))
+    
+    # Squared short interest (emphasizes large values)
+    squared_si = np.square(short_interest)
+    feature_list.append(squared_si.reshape(lookback_window, 1))
+    
+    # Exponential transformation of days to cover
+    exp_dtc = 1 - np.exp(-days_to_cover)  # Bounded between 0 and 1
+    feature_list.append(exp_dtc.reshape(lookback_window, 1))
+    
+    # -------------------------------------------------------------------------
+    # 15. NEW: TEMPORAL FEATURES
+    # -------------------------------------------------------------------------
+    
+    # Rate of change in important price features
+    for day_idx in important_days:
+        if day_idx > 0:
+            # Rate of change in daily range
+            range_current = (high_prices[:, day_idx] - low_prices[:, day_idx])
+            range_prev = (high_prices[:, day_idx-1] - low_prices[:, day_idx-1])
+            range_roc = (range_current - range_prev) / (range_prev + 1e-8)
+            feature_list.append(range_roc.reshape(lookback_window, 1))
+    
+    # -------------------------------------------------------------------------
+    # 16. COMBINE ALL FEATURES
+    # -------------------------------------------------------------------------
+    
+    combined_features = np.hstack(feature_list)
     
     # Final check for NaN values
-    result = np.nan_to_num(result, nan=0.0)
+    combined_features = np.nan_to_num(combined_features, nan=0.0)
     
-    return result
+    # Final check for infinite values
+    combined_features = np.clip(combined_features, -1e9, 1e9)
+    
+    return combined_features
 ```
 
-Performance of this code: MAPE = 9.63%
-Change from previous: -2.76%
-Statistical Analysis: 64/88 features were significant (p < 0.05), 42 were highly significant (p < 0.01)
+Performance of this code: MAPE = 22.22%
+Change from previous: -9.00%
+Statistical Analysis: 59/103 features were significant (p < 0.05), 40 were highly significant (p < 0.01)
 
 INSTRUCTIONS FOR NEW CODE:
 - Analyze the previous code and understand what features it tried to create
@@ -276,7 +518,7 @@ INSTRUCTIONS FOR NEW CODE:
 
 
 CURRENT TASK (Iteration 5):
-Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 6.87%.
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 13.23%.
 
 Based on the performance history, DL-based feature importance analysis, and previous code above, analyze what worked and what didn't, then create a new feature engineering approach that:
 1. Learns from previous iterations' successes and failures

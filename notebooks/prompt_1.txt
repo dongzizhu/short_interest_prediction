@@ -13,17 +13,17 @@ Total: 1 + 1 + 60 = 62 features(dimensions) per timestamp.
 
 
 PERFORMANCE HISTORY:
-Iteration 0: Baseline - MAPE: 6.87%
+Iteration 0: Baseline - MAPE: 17.25%
   Features: All 62 original features
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_35 (importance=0.0001), Feature_0 (importance=0.0001), Feature_12 (importance=0.0001), Feature_26 (importance=0.0000), Feature_1 (importance=0.0000)
+    • Top important features: Feature_1 (importance=0.0003), Feature_48 (importance=0.0003), Feature_40 (importance=0.0003), Feature_27 (importance=0.0002), Feature_10 (importance=0.0002)
 
 
 
 
-DL-BASED FEATURE IMPORTANCE INSIGHTS FROM BEST MODEL (MAPE: 6.87%):
-- Most important features: Feature_35 (importance=0.0001), Feature_0 (importance=0.0001), Feature_12 (importance=0.0001), Feature_26 (importance=0.0000), Feature_1 (importance=0.0000)
-- Least important features: Feature_52 (importance=-0.0000), Feature_47 (importance=-0.0000), Feature_14 (importance=-0.0000)
+DL-BASED FEATURE IMPORTANCE INSIGHTS FROM BEST MODEL (MAPE: 17.25%):
+- Most important features: Feature_1 (importance=0.0003), Feature_48 (importance=0.0003), Feature_40 (importance=0.0003), Feature_27 (importance=0.0002), Feature_10 (importance=0.0002)
+- Least important features: Feature_22 (importance=-0.0002), Feature_60 (importance=-0.0002), Feature_30 (importance=-0.0001)
 
 
 
@@ -31,7 +31,7 @@ DL-BASED FEATURE IMPORTANCE INSIGHTS FROM BEST MODEL (MAPE: 6.87%):
 
 
 CURRENT TASK (Iteration 1):
-Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 6.87%.
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 17.25%.
 
 Based on the performance history, DL-based feature importance analysis, and previous code above, analyze what worked and what didn't, then create a new feature engineering approach that:
 1. Learns from previous iterations' successes and failures

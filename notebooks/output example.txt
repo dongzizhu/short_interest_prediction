@@ -1,0 +1,96 @@
+================================================================================
+UNIVERSAL FEATURE ENGINEERING PERFORMANCE REPORT
+================================================================================
+
+📊 SUMMARY STATISTICS:
+  Total tickers tested: 53
+  Successful tests: 53
+  Failed tests: 0
+
+🎯 MAPE IMPROVEMENT STATISTICS:
+  Average MAPE improvement: -2.86%
+  Median MAPE improvement: -2.39%
+  Std deviation: 6.87%
+  Min improvement: -25.22%
+  Max improvement: 33.29%
+
+📈 RELATIVE IMPROVEMENT STATISTICS:
+  Average relative improvement: -38.5%
+  Median relative improvement: -29.2%
+  Std deviation: 57.6%
+
+🏆 IMPROVEMENT DISTRIBUTION:
+  Tickers with positive improvement: 5/53 (9.4%)
+  Tickers with >0.5% improvement: 5/53 (9.4%)
+
+📋 DETAILED RESULTS:
+----------------------------------------------------------------------------------------------------
+Ticker   Baseline MAPE Enhanced MAPE Improvement  Rel. Imp.  Features
+----------------------------------------------------------------------------------------------------
+BBW      10.34        11.69         -1.35        -13.1      62->71
+UNFI     6.13         8.00          -1.88        -30.6      62->71
+CMPR     6.05         8.44          -2.39        -39.4      62->71
+VNDA     8.85         10.18         -1.33        -15.0      62->71
+LWAY     20.62        23.56         -2.95        -14.3      62->71
+MEI      16.44        16.60         -0.16        -1.0       62->71
+SMBK     18.16        23.55         -5.39        -29.7      62->71
+HLIT     8.90         15.46         -6.56        -73.6      62->71
+INBK     20.15        27.60         -7.45        -37.0      62->71
+FDUS     28.69        26.23         2.46         8.6        62->71
+MCRI     19.60        25.71         -6.12        -31.2      62->71
+GNE      26.96        21.44         5.53         20.5       62->71
+CYRX     8.26         9.05          -0.79        -9.6       62->71
+BBSI     15.15        19.57         -4.42        -29.2      62->71
+INVA     3.56         4.31          -0.75        -21.0      62->71
+OPK      10.98        12.56         -1.58        -14.4      62->71
+OCUL     10.21        13.96         -3.75        -36.7      62->71
+DXLG     7.30         8.54          -1.24        -16.9      62->71
+DXPE     9.42         13.16         -3.75        -39.8      62->71
+AMRK     7.07         32.29         -25.22       -356.8     62->71
+AXGN     10.32        14.81         -4.49        -43.5      62->71
+HCKT     10.83        13.22         -2.39        -22.0      62->71
+ZEUS     20.79        18.15         2.64         12.7       62->71
+ANIP     13.00        31.36         -18.36       -141.3     62->71
+IMMR     8.22         12.87         -4.65        -56.5      62->71
+CLFD     5.51         13.73         -8.22        -149.3     62->71
+AEHR     7.34         8.31          -0.97        -13.3      62->71
+NAT      8.03         11.97         -3.95        -49.2      62->71
+EXTR     11.64        17.25         -5.61        -48.2      62->71
+CHEF     5.37         7.70          -2.32        -43.2      62->71
+PLYM     30.28        33.36         -3.08        -10.2      62->71
+PEB      5.79         14.01         -8.21        -141.8     62->71
+PLCE     12.34        12.89         -0.55        -4.5       62->71
+XHR      8.84         9.04          -0.20        -2.2       62->71
+FBK      11.28        18.18         -6.91        -61.2      62->71
+GSBC     6.87         7.80          -0.94        -13.6      62->71
+GOGO     5.59         5.63          -0.04        -0.8       62->71
+SENEA    10.84        12.49         -1.65        -15.3      62->71
+GNK      10.76        19.61         -8.85        -82.3      62->71
+QNST     13.43        20.02         -6.59        -49.0      62->71
+KRO      12.59        13.02         -0.43        -3.4       62->71
+MITK     4.99         6.45          -1.46        -29.3      62->71
+GSBD     11.21        14.11         -2.90        -25.9      62->71
+URGN     8.00         10.40         -2.41        -30.1      62->71
+AVNW     7.34         12.63         -5.29        -72.0      62->71
+HTLD     9.57         14.71         -5.14        -53.7      62->71
+XOMA     11.54        12.29         -0.75        -6.5       62->71
+UFPT     13.46        10.69         2.77         20.6       62->71
+FCEL     85.99        52.70         33.29        38.7       62->71
+NVAX     6.86         8.55          -1.69        -24.6      62->71
+GERN     7.54         13.26         -5.72        -75.9      62->71
+CSV      11.56        17.38         -5.82        -50.4      62->71
+FOR      11.87        13.22         -1.35        -11.4      62->71
+----------------------------------------------------------------------------------------------------
+
+💾 Detailed report saved to: cache/universal_feature_engineering_validation_report.txt
+💾 Validation results saved to: cache/universal_feature_engineering_validation_results.pkl
+
+🎯 VALIDATION SUMMARY:
+  Successfully tested: 53/53 tickers
+  Average MAPE improvement: -2.86%
+  Tickers with positive improvement: 5/53 (9.4%)
+  Tickers with >0.5% improvement: 5/53 (9.4%)
+
+🎉 Complete multi-ticker process completed successfully!
+Processed 5 tickers for iterative feature engineering
+Generated and validated universal feature engineering code on 53 tickers

@@ -1500,12 +1500,15 @@ def call_claude_for_universal_code(anthropic_api_key, ticker_results):
         return None
 
 
-def get_available_tickers(parquet_path='../data/price_data_multiindex_20250904_113138.parquet', max_tickers=10):
+def get_available_tickers(parquet_path='../data/price_data_multiindex_20250904_113138.parquet', max_tickers=None):
     """Get available tickers from the parquet file"""
     try:
         df = pd.read_parquet(parquet_path)
         all_tickers = set([x[0] for x in df.columns])
-        available_tickers = list(all_tickers)[:max_tickers]
+        if max_tickers:
+            available_tickers = list(all_tickers)[:max_tickers]
+        else:
+            available_tickers = list(all_tickers)
         print(f"📊 Found {len(all_tickers)} total tickers, using first {len(available_tickers)} for testing")
         return available_tickers
     except Exception as e:
@@ -1742,10 +1745,12 @@ def main():
     ANTHROPIC_API_KEY = ''  # Replace with your actual API key
     
     # Get available tickers from parquet file (first 10 for debugging)
-    all_available_tickers = get_available_tickers(max_tickers=10)
+    # all_available_tickers = get_available_tickers()
+    all_available_tickers = ['BBW', 'UNFI', 'CMPR', 'VNDA', 'LWAY', 'MEI', 'SMBK', 'HLIT', 'INBK', 'FDUS', 'MCRI', 'GNE', 'CYRX', 'BBSI', 'INVA', 'OPK', 'OCUL', 'DXLG', 'DXPE', 'AMRK', 'AXGN', 'HCKT', 'ZEUS', 'ANIP', 'IMMR', 'CLFD', 'AEHR', 'NAT', 'EXTR', 'CHEF', 'PLYM', 'PEB', 'PLCE', 'XHR', 'FBK', 'GSBC', 'GOGO', 'SENEA', 'GNK', 'QNST', 'KRO', 'MITK', 'GSBD', 'URGN', 'AVNW', 'HTLD', 'XOMA', 'UFPT', 'FCEL', 'NVAX', 'GERN', 'CSV', 'FOR']
     
     # List of tickers to process for iterative feature engineering (subset for initial development)
-    iterative_tickers = ['TSLA', 'PFE', 'AAPL']
+    iterative_tickers = ['BBW', 'UNFI', 'CMPR', 'VNDA', 'LWAY']
+    # iterative_tickers = ['YORW']  # Reduced for faster testing
     
     print("🚀 Starting Multi-Ticker Iterative Agent-Based Feature Selection Process")
     print("="*80)

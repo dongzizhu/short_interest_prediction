@@ -58,6 +58,11 @@ Iteration 8: Iteration 8 - MAPE: 54.38% (Improvement: -12.4%)
   DL-Based Feature Importance Analysis:
     • Top important features: Feature_3 (importance=0.0173), Feature_33 (importance=0.0074), Feature_20 (importance=0.0049), Feature_5 (importance=0.0049), Feature_15 (importance=0.0044)
 
+Iteration 9: Iteration 9 - MAPE: 42.35% (Improvement: -0.4%)
+  Features: claude feature engineering
+  DL-Based Feature Importance Analysis:
+    • Top important features: Feature_17 (importance=0.0094), Feature_12 (importance=0.0051), Feature_29 (importance=0.0048), Feature_1 (importance=0.0044), Feature_31 (importance=0.0042)
+
 
 
 
@@ -71,7 +76,7 @@ DL-BASED FEATURE IMPORTANCE INSIGHTS FROM BEST MODEL (MAPE: 42.00%):
 
 
 PREVIOUS ITERATION CODE:
-The following code was used in the most recent iteration (Iteration 8):
+The following code was used in the most recent iteration (Iteration 9):
 
 ```python
 def construct_features(data):
@@ -89,21 +94,21 @@ def construct_features(data):
     """
     # Handle edge case of empty data
     if data.shape[0] == 0:
-        return np.zeros((0, 40))  # Return empty array with expected feature count
+        return np.zeros((0, 35))  # Return empty array with expected feature count
     
     # Initialize output array
     lookback_window = data.shape[0]
     engineered_features = []
     
     # Analysis of previous iterations:
-    # - Iteration 5 (MAPE 42.00%) was the best model, with Feature_21, Feature_33, Feature_9, Feature_13, Feature_8 being most important
-    # - Iteration 7 (MAPE 42.54%) was slightly worse despite having more features
+    # - Iteration 5 (MAPE 42.00%) was the best model with fewer features
+    # - Iteration 8 (MAPE 54.38%) had too many features (40) and likely overfit
     # - Key insights:
-    #   1. Too many features can lead to overfitting (Iteration 6 had 56 features and performed poorly)
-    #   2. Need to focus on the most predictive features from Iteration 5
-    #   3. Need better normalization and scaling of features
-    #   4. Need to reduce multicollinearity between features
-    #   5. Need to focus on financial domain knowledge and relationships between SI, volume, and price
+    #   1. Need to focus on the most important features from best model (Feature_21, Feature_33, Feature_9, Feature_13, Feature_8)
+    #   2. Reduce feature count to avoid overfitting (target ~30-35 features)
+    #   3. Improve normalization and scaling
+    #   4. Focus on financial domain knowledge and SI-volume-price relationships
+    #   5. Reduce multicollinearity between features
     
     for t in range(lookback_window):
         # Get data for current timestamp
@@ -128,12 +133,11 @@ def construct_features(data):
         # Feature Group 1: Core SI and Volume Features
         # These were consistently important across iterations
         features = [
-            short_interest,                                # Original short interest
+            short_interest,                                # Original short interest (consistently important)
             avg_volume,                                    # Original volume
-            short_interest / (avg_volume + 1e-8),          # SI to volume ratio (key relationship)
             np.log1p(short_interest),                      # Log-transformed SI (for better scaling)
             np.log1p(avg_volume),                          # Log-transformed volume
-            np.log1p(short_interest) - np.log1p(avg_volume) # Log ratio (better scaling than direct ratio)
+            short_interest / (avg_volume + 1e-8),          # Days to cover (key metric for short squeeze potential)
         ]
         
         # Feature Group 2: SI History and Dynamics
@@ -154,14 +158,10 @@ def construct_features(data):
         
         # SI momentum (rate of change over different time periods)
         si_momentum_2d = (si_history[0] - si_history[2]) / 2 if len(si_history) > 2 else 0
-        si_momentum_3d = (si_history[0] - si_history[3]) / 3 if len(si_history) > 3 else 0
-        
-        # SI acceleration (second derivative)
-        si_accel = (si_history[0] - 2*si_history[1] + si_history[2]) if len(si_history) > 2 else 0
         
         # Exponentially weighted SI (gives more weight to recent values)
         if len(si_history) >= 3:
-            weights = np.array([0.65, 0.25, 0.1])
+            weights = np.array([0.7, 0.2, 0.1])
             ema_si = np.sum(weights * si_history[:3]) / np.sum(weights)
             # SI deviation from trend
             si_trend_deviation = si_history[0] / (ema_si + 1e-8) - 1
@@ -173,9 +173,6 @@ def construct_features(data):
             si_change,                # Absolute change in SI
             si_pct_change,            # Percentage change in SI
             si_momentum_2d,           # 2-day SI momentum
-            si_momentum_3d,           # 3-day SI momentum
-            si_accel,                 # SI acceleration
-            ema_si,                   # Exponentially weighted SI
             si_trend_deviation        # SI deviation from trend
         ])
         
@@ -188,11 +185,11 @@ def construct_features(data):
             current_open = opens[0]
             
             # Price returns over different timeframes
-            daily_return = current_close/current_open - 1 if current_open != 0 else 0
+            daily_return = (current_close/current_open - 1) if current_open != 0 else 0
             
-            returns_1d = current_close/closes[1] - 1 if len(closes) > 1 else 0
-            returns_3d = current_close/closes[3] - 1 if len(closes) > 3 else 0
-            returns_5d = current_close/closes[5] - 1 if len(closes) > 5 else 0
+            returns_1d = (current_close/closes[1] - 1) if len(closes) > 1 else 0
+            returns_3d = (current_close/closes[3] - 1) if len(closes) > 3 else 0
+            returns_5d = (current_close/closes[5] - 1) if len(closes) > 5 else 0
             
             # Price volatility measures
             if len(closes) >= 5:
@@ -201,7 +198,7 @@ def construct_features(data):
                 
                 # High-Low range volatility
                 hl_ranges = [(highs[i] - lows[i])/(opens[i] + 1e-8) for i in range(5)]
-                hl_volatility = np.std(hl_ranges)
+                hl_volatility = np.mean(hl_ranges)  # Average daily range
             else:
                 price_volatility = 0
                 hl_volatility = 0
@@ -214,22 +211,17 @@ def construct_features(data):
             price_to_ma5 = current_close/ma5 - 1
             price_to_ma10 = current_close/ma10 - 1
             
-            # Moving average crossover
-            ma_crossover = ma5/ma10 - 1
-            
             features.extend([
                 daily_return,         # Daily return
-                returns_1d,           # 1-day return
                 returns_3d,           # 3-day return
                 returns_5d,           # 5-day return
                 price_volatility,     # Price volatility
                 hl_volatility,        # High-Low range volatility
                 price_to_ma5,         # Price relative to 5-day MA
                 price_to_ma10,        # Price relative to 10-day MA
-                ma_crossover          # MA crossover signal
             ])
         else:
-            features.extend([0, 0, 0, 0, 0, 0, 0, 0, 0])
+            features.extend([0, 0, 0, 0, 0, 0, 0])
         
         # Feature Group 4: Volume Dynamics
         # Volume patterns are critical for short interest prediction
@@ -246,7 +238,6 @@ def construct_features(data):
             vol_history.append(avg_volume)
         
         # Volume change metrics
-        vol_change = vol_history[0] - vol_history[1]
         vol_pct_change = vol_history[0] / (vol_history[1] + 1e-8) - 1
         
         # Volume trend
@@ -261,7 +252,6 @@ def construct_features(data):
         vol_volatility = np.std(vol_history) / (np.mean(vol_history) + 1e-8) if len(vol_history) > 1 else 0
         
         features.extend([
-            vol_change,               # Absolute change in volume
             vol_pct_change,           # Percentage change in volume
             vol_trend_ratio,          # Volume relative to trend
             vol_volatility            # Volume volatility
@@ -282,30 +272,25 @@ def construct_features(data):
         # SI relative to price volatility
         si_vol_interaction = short_interest * price_volatility if len(closes) >= 5 else 0
         
-        # SI-momentum interaction
-        si_momentum_interaction = short_interest * returns_3d if len(closes) > 3 else 0
-        
-        # Days to cover (important metric for short squeeze potential)
-        days_to_cover = short_interest / (avg_volume + 1e-8)
-        
-        # Short squeeze potential indicator
+        # Short squeeze potential indicator (refined from previous iteration)
         short_squeeze_indicator = 0
         if len(closes) >= 5 and short_interest > 0:
-            # High SI + price increase + volume increase = potential squeeze
-            price_up = returns_5d > 0.05  # 5% price increase
-            si_high = days_to_cover > 3   # More than 3 days to cover
-            vol_increase = vol_pct_change > 0.2  # 20% volume increase
+            # Refined short squeeze indicator based on SI, price momentum, and volume
+            days_to_cover = short_interest / (avg_volume + 1e-8)
+            price_momentum = returns_5d
+            vol_surge = vol_pct_change
             
-            if price_up and si_high and vol_increase:
-                # Squeeze intensity proportional to price change, SI level, and volume increase
-                short_squeeze_indicator = returns_5d * days_to_cover * vol_pct_change
+            # Weighted combination of factors
+            short_squeeze_indicator = (
+                0.4 * np.tanh(days_to_cover / 5) +  # Normalized days to cover
+                0.4 * np.tanh(price_momentum * 10) +  # Normalized price momentum
+                0.2 * np.tanh(vol_surge * 5)  # Normalized volume surge
+            )
         
         features.extend([
             si_to_price,              # SI relative to price
             si_price_change_ratio,    # SI change relative to price change
             si_vol_interaction,       # SI-volatility interaction
-            si_momentum_interaction,  # SI-momentum interaction
-            days_to_cover,            # Days to cover
             short_squeeze_indicator   # Short squeeze potential
         ])
         
@@ -314,16 +299,17 @@ def construct_features(data):
         
         if len(closes) >= 14:
             # RSI calculation (14-day)
-            gains = np.array([max(0, closes[i] - closes[i+1]) for i in range(13)])
-            losses = np.array([max(0, closes[i+1] - closes[i]) for i in range(13)])
+            diff = np.diff(np.concatenate(([closes[0]], closes[:13])))
+            gains = np.maximum(diff, 0)
+            losses = np.maximum(-diff, 0)
             avg_gain = np.mean(gains)
             avg_loss = np.mean(losses)
             rs = avg_gain / (avg_loss + 1e-8)
             rsi = 100 - (100 / (1 + rs))
             
             # Bollinger Bands (20-day)
-            ma20 = np.mean(closes[:14])
-            std20 = np.std(closes[:14])
+            ma20 = np.mean(closes[:min(20, len(closes))])
+            std20 = np.std(closes[:min(20, len(closes))])
             upper_band = ma20 + (2 * std20)
             lower_band = ma20 - (2 * std20)
             bb_width = (upper_band - lower_band)/(ma20 + 1e-8)
@@ -338,40 +324,77 @@ def construct_features(data):
             ema26 = np.sum(weights_26 * closes[:len(weights_26)]) / np.sum(weights_26)
             macd = ema12 - ema26
             
+            # Stochastic Oscillator (14-day)
+            if len(closes) >= 14 and len(highs) >= 14 and len(lows) >= 14:
+                highest_high = np.max(highs[:14])
+                lowest_low = np.min(lows[:14])
+                stoch_k = 100 * (closes[0] - lowest_low) / (highest_high - lowest_low + 1e-8)
+                
+                # Simplified %D calculation (3-day SMA of %K)
+                stoch_d = stoch_k  # Simplified for single timepoint
+            else:
+                stoch_k = 50
+                stoch_d = 50
+            
             features.extend([
                 rsi / 100,            # RSI (normalized to 0-1)
                 bb_width,             # Bollinger Band width
                 bb_position,          # Position within Bollinger Bands
-                macd / (closes[0] + 1e-8)  # MACD normalized by price
+                macd / (closes[0] + 1e-8),  # MACD normalized by price
+                stoch_k / 100         # Stochastic %K (normalized to 0-1)
             ])
         else:
-            features.extend([0.5, 0, 0.5, 0])  # Default values for technical indicators
+            features.extend([0.5, 0, 0.5, 0, 0.5])  # Default values for technical indicators
         
-        # Feature Group 7: SI-Technical Indicator Interactions
-        # These capture how SI relates to technical conditions
+        # Feature Group 7: Advanced SI Indicators
+        # These are specialized indicators for short interest prediction
         
-        # SI-RSI interaction (important for detecting potential reversals)
-        si_rsi_interaction = short_interest * (rsi/100) if len(closes) >= 14 else 0
+        # SI Pressure Index: Combines SI level, price momentum, and volume
+        si_pressure = 0
+        if len(closes) >= 5 and short_interest > 0:
+            days_to_cover = short_interest / (avg_volume + 1e-8)
+            price_momentum = returns_5d
+            
+            # SI pressure increases with high days to cover and positive price momentum
+            si_pressure = days_to_cover * (1 + price_momentum)
+            
+            # Normalize using tanh to keep within reasonable range
+            si_pressure = np.tanh(si_pressure / 10)
         
-        # SI-Bollinger Band interaction (important for detecting potential breakouts)
-        si_bb_interaction = short_interest * bb_position if len(closes) >= 14 else 0
+        # SI Reversal Signal: Detects potential reversals in short interest
+        si_reversal = 0
+        if len(si_history) >= 3 and len(closes) >= 3:
+            # SI trend
+            si_trend = si_history[0] - si_history[2]
+            
+            # Price trend opposite to SI trend could signal reversal
+            price_trend = closes[0] - closes[2]
+            
+            # If SI is increasing but price is also increasing, potential reversal
+            # If SI is decreasing but price is also decreasing, potential reversal
+            if (si_trend > 0 and price_trend > 0) or (si_trend < 0 and price_trend < 0):
+                si_reversal = np.sign(si_trend) * np.abs(price_trend) / (closes[2] + 1e-8)
+                
+                # Normalize
+                si_reversal = np.tanh(si_reversal * 5)
         
-        # SI-MACD interaction (important for detecting trend changes)
-        si_macd_interaction = short_interest * (macd / (closes[0] + 1e-8)) if len(closes) >= 14 else 0
+        # SI Concentration: Ratio of SI to market cap (approximated by price)
+        si_concentration = short_interest / (closes[0] + 1e-8) if len(closes) > 0 else 0
         
-        # SI relative to technical condition (composite score)
-        if len(closes) >= 14:
-            # Technical condition score (-1 to 1, negative = bearish, positive = bullish)
-            tech_score = ((rsi/100 - 0.5) + bb_position - 0.5 + (macd / (closes[0] + 1e-8) * 10)) / 3
-            si_tech_interaction = short_interest * tech_score
-        else:
-            si_tech_interaction = 0
+        # SI Efficiency: How effectively SI predicts price movements
+        si_efficiency = 0
+        if len(si_history) >= 2 and len(closes) >= 2:
+            si_direction = np.sign(si_history[0] - si_history[1])
+            price_direction = np.sign(closes[1] - closes[0])  # Inverse relationship expected
+            
+            # +1 if SI correctly predicts price (inverse relationship), -1 if wrong
+            si_efficiency = -1 * si_direction * price_direction
         
         features.extend([
-            si_rsi_interaction,       # SI-RSI interaction
-            si_bb_interaction,        # SI-Bollinger Band interaction
-            si_macd_interaction,      # SI-MACD interaction
-            si_tech_interaction       # SI-Technical condition interaction
+            si_pressure,              # SI Pressure Index
+            si_reversal,              # SI Reversal Signal
+            si_concentration,         # SI Concentration
+            si_efficiency             # SI Efficiency
         ])
         
         # Add features for current timestamp to output
@@ -383,12 +406,23 @@ def construct_features(data):
     # Final safety check for NaN and inf values
     result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
     
+    # Normalize features to improve model training
+    # This helps prevent features with large magnitudes from dominating
+    for i in range(result.shape[1]):
+        col = result[:, i]
+        col_range = np.max(col) - np.min(col)
+        if col_range > 0:
+            # Scale to approximately [-1, 1] range while preserving 0
+            max_abs = max(abs(np.max(col)), abs(np.min(col)))
+            if max_abs > 0:
+                result[:, i] = col / max_abs
+    
     return result
 ```
 
-Performance of this code: MAPE = 54.38%
-Change from previous: -12.39%
-Statistical Analysis: 19/40 features were significant (p < 0.05), 11 were highly significant (p < 0.01)
+Performance of this code: MAPE = 42.35%
+Change from previous: -0.35%
+Statistical Analysis: 26/32 features were significant (p < 0.05), 19 were highly significant (p < 0.01)
 
 INSTRUCTIONS FOR NEW CODE:
 - Analyze the previous code and understand what features it tried to create
@@ -399,7 +433,7 @@ INSTRUCTIONS FOR NEW CODE:
 - Think about what additional financial insights or technical indicators could be valuable
 
 
-CURRENT TASK (Iteration 9):
+CURRENT TASK (Iteration 10):
 Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 42.00%.
 
 Based on the performance history, DL-based feature importance analysis, and previous code above, analyze what worked and what didn't, then create a new feature engineering approach that:
