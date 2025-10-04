@@ -60,6 +60,11 @@ Iteration 7: Iteration 7 - MAPE: 7.20% (Improvement Over Baseline: -0.6%) (Impro
   DL-Based Feature Importance Analysis:
     • Top important features: Feature_14_t3 (importance=0.0050), Feature_11_t2 (importance=0.0048), Feature_23_t3 (importance=0.0036), Feature_7_t3 (importance=0.0035), Feature_19_t3 (importance=0.0035)
 
+Iteration 8: Iteration 8 - MAPE: 7.28% (Improvement Over Baseline: -0.7%) (Improvement Over Last: -0.1%)
+  Features: claude feature engineering
+  DL-Based Feature Importance Analysis:
+    • Top important features: Feature_12_t2 (importance=0.0085), Feature_10_t2 (importance=0.0054), Feature_9_t3 (importance=0.0050), Feature_9_t0 (importance=0.0046), Feature_4_t2 (importance=0.0043)
+
 
 
 
@@ -69,7 +74,7 @@ Iteration 7: Iteration 7 - MAPE: 7.20% (Improvement Over Baseline: -0.6%) (Impro
 
 
 PREVIOUS ITERATION CODE:
-The following code was used in the most recent iteration (Iteration 7):
+The following code was used in the most recent iteration (Iteration 8):
 
 ```python
 def construct_features(data):
@@ -87,10 +92,12 @@ def construct_features(data):
         open_prices, high_prices, low_prices, close_prices = ohlc[:, 0], ohlc[:, 1], ohlc[:, 2], ohlc[:, 3]
         
         # Keep essential raw features based on importance analysis
+        # Always include short interest and volume (consistently high importance)
+        # Include most recent close price (high importance in multiple iterations)
         raw_keep = [
-            short_interest,  # Always keep short interest (highest importance)
-            avg_volume,      # Always keep average volume (high importance)
-            close_prices[-1],  # Most recent close price (high importance)
+            short_interest,  # Current short interest
+            avg_volume,      # Average daily volume
+            close_prices[-1],  # Most recent close price
         ]
         
         # Calculate MAX_NEW based on raw features kept
@@ -99,12 +106,15 @@ def construct_features(data):
         # Initialize engineered features list
         eng = []
         
-        # 1. Days to cover - consistently high importance across iterations
+        # 1. Days to cover - consistently high importance across all iterations
+        # This is a fundamental metric in short interest analysis
         days_to_cover = short_interest / max(avg_volume, 1e-8)
-        eng.append(days_to_cover)
+        # Apply log transformation to handle skewness
+        days_to_cover_log = np.log1p(days_to_cover) if days_to_cover > 0 else 0
+        eng.append(days_to_cover_log)
         
-        # 2. Short interest momentum with exponential weighting
-        # Improved by focusing on more recent changes with higher weights
+        # 2. Short interest momentum with adaptive lookback
+        # High importance in iterations 4-7 (Feature_17_t3, Feature_11_t3)
         if t > 0:
             prev_si = data[t-1, 0]
             si_change = (short_interest - prev_si) / max(prev_si, 1e-8)
@@ -123,14 +133,17 @@ def construct_features(data):
                 
                 if si_changes:
                     weighted_si_change = np.sum(weights[1:] * np.array(si_changes))
-                    si_change = 0.7 * si_change + 0.3 * weighted_si_change  # Blend recent and weighted
+                    # Blend recent and weighted with higher weight on recent (improved from iteration 7)
+                    si_change = 0.8 * si_change + 0.2 * weighted_si_change
             
-            eng.append(si_change)
+            # Apply sigmoid-like transformation to handle outliers while preserving sign
+            si_change_transformed = np.sign(si_change) * np.log1p(abs(si_change) * 10)
+            eng.append(si_change_transformed)
         else:
             eng.append(0.0)
         
         # 3. Short interest acceleration - captures rate of change in momentum
-        # High importance in previous iterations (Feature_11_t3, Feature_17_t3)
+        # High importance in iterations 4-7 (Feature_11_t3, Feature_17_t3)
         if t >= 2:
             si_t = short_interest
             si_t1 = data[t-1, 0]
@@ -148,20 +161,15 @@ def construct_features(data):
             norm_acceleration = acceleration * avg_si / max(si_t, 1e-8)
             
             # Apply sigmoid-like transformation to handle outliers while preserving sign
-            accel_transformed = np.sign(norm_acceleration) * np.log1p(abs(norm_acceleration) * 20)
+            # Increased scaling factor from 20 to 30 to better capture significant changes
+            accel_transformed = np.sign(norm_acceleration) * np.log1p(abs(norm_acceleration) * 30)
             
             eng.append(accel_transformed)
         else:
             eng.append(0.0)
         
-        # 4. Short interest to volume ratio with log transformation
-        # Consistently important in previous iterations
-        si_volume_ratio = short_interest / max(avg_volume, 1e-8)
-        si_volume_ratio_log = np.log1p(si_volume_ratio) if si_volume_ratio > 0 else 0
-        eng.append(si_volume_ratio_log)
-        
-        # 5. Short squeeze potential - combining days to cover with price momentum and volume
-        # High importance in previous iterations (Feature_8_t2, Feature_17_t3)
+        # 4. Short squeeze potential - combining days to cover with price momentum and volume
+        # High importance in iterations 4-5 (Feature_8_t2, Feature_17_t3)
         if len(close_prices) >= 5 and t >= 3:
             # Price momentum - exponentially weighted to emphasize recent movement
             weights = np.exp(np.linspace(0, 1, 5))
@@ -181,7 +189,8 @@ def construct_features(data):
             
             # Combine days to cover with price momentum and volume acceleration
             # Higher score when days to cover is high, price momentum is positive, and volume is accelerating
-            squeeze_potential = days_to_cover * max(0, price_momentum) * max(1, 1 + volume_accel)
+            # Improved formula with higher weight on days to cover (most important factor)
+            squeeze_potential = days_to_cover * (1 + max(0, price_momentum)) * (1 + max(0, volume_accel))
             
             # Log transform to handle skewness
             squeeze_potential_log = np.log1p(squeeze_potential) if squeeze_potential > 0 else 0
@@ -189,8 +198,8 @@ def construct_features(data):
         else:
             eng.append(0.0)
         
-        # 6. Short interest relative to historical range
-        # New feature that performed well in iteration 6 (Feature_15_t0, Feature_15_t3)
+        # 5. Short interest relative to historical range
+        # High importance in iterations 4-5 (Feature_15_t0, Feature_15_t3)
         if t >= 5:
             # Get short interest history
             si_history = [data[max(0, t-i), 0] for i in range(5, -1, -1)]
@@ -207,30 +216,15 @@ def construct_features(data):
             # -1: at historical low, 0: at middle of range, 1: at historical high
             si_position_transformed = 2 * si_position - 1
             
+            # Apply non-linear transformation to emphasize extremes (new in iteration 8)
+            si_position_transformed = np.sign(si_position_transformed) * np.power(abs(si_position_transformed), 0.7)
+            
             eng.append(si_position_transformed)
         else:
             eng.append(0.0)
         
-        # 7. Price trend with adaptive lookback and exponential weighting
-        # Consistently important in previous iterations
-        if len(close_prices) >= 5:
-            weights = np.exp(np.linspace(0, 1, 5))
-            weights = weights / np.sum(weights)
-            
-            # Calculate returns for each period
-            returns = []
-            for i in range(1, 5):
-                ret = (close_prices[-i] / max(close_prices[-i-1], 1e-8)) - 1.0
-                returns.append(ret)
-            
-            # Apply weights to returns
-            weighted_price_trend = np.sum(weights[:-1] * np.array(returns))
-            eng.append(weighted_price_trend)
-        else:
-            eng.append(0.0)
-        
-        # 8. Bollinger Band position with volatility adjustment
-        # High importance in previous iterations (Feature_15_t0, Feature_15_t1)
+        # 6. Bollinger Band position with volatility adjustment
+        # High importance in iterations 4-5 (Feature_15_t0, Feature_15_t1)
         if len(close_prices) >= 10:
             sma = np.mean(close_prices[-10:])
             std = np.std(close_prices[-10:])
@@ -243,15 +237,18 @@ def construct_features(data):
             bb_width = (2 * std) / max(sma, 1e-8)
             
             # Stronger signal in low volatility environments (tighter bands)
+            # Improved scaling logic from iteration 7
             if bb_width < 0.05:  # Very tight bands
                 bb_position *= 1.5
+            elif bb_width > 0.15:  # Very wide bands
+                bb_position *= 0.7  # Reduce signal strength in high volatility
             
             eng.append(bb_position)
         else:
             eng.append(0.0)
         
-        # 9. RSI with adaptive lookback and extremes emphasis
-        # High importance in previous iterations (Feature_8_t3, Feature_19_t3)
+        # 7. RSI with adaptive lookback and extremes emphasis
+        # High importance in iterations 4-7 (Feature_8_t3, Feature_19_t3)
         if len(close_prices) >= 10:
             # Use adaptive lookback based on available data
             lookback = min(14, len(close_prices)-1)
@@ -269,11 +266,14 @@ def construct_features(data):
             rsi = 100 - (100 / (1 + rs))
             
             # Transform RSI to emphasize extremes (more predictive for reversals)
+            # Improved transformation from iteration 7 to better capture extremes
             rsi_transformed = 0.0
             if rsi < 30:
-                rsi_transformed = -1.0 * (30 - rsi) / 30  # Oversold: -1 to 0
+                # Oversold: stronger signal as RSI approaches 0
+                rsi_transformed = -1.0 * np.power((30 - rsi) / 30, 1.5)
             elif rsi > 70:
-                rsi_transformed = (rsi - 70) / 30  # Overbought: 0 to 1
+                # Overbought: stronger signal as RSI approaches 100
+                rsi_transformed = np.power((rsi - 70) / 30, 1.5)
             else:
                 # Middle range gets less weight (closer to 0)
                 rsi_transformed = (rsi - 50) / 40  # Middle: -0.5 to 0.5
@@ -282,8 +282,8 @@ def construct_features(data):
         else:
             eng.append(0.0)
         
-        # 10. Short interest trend reversal signal
-        # High importance in previous iterations (Feature_11_t3, Feature_17_t3)
+        # 8. Short interest trend reversal signal
+        # High importance in iterations 4-7 (Feature_11_t3, Feature_17_t3)
         if t >= 2:
             si_history = [data[max(0, t-2+i), 0] for i in range(3)]
             
@@ -293,19 +293,22 @@ def construct_features(data):
             
             # Strong signal when acceleration is opposite to direction (trend reversal)
             if np.sign(si_accel) != np.sign(si_change):
-                reversal_strength = abs(si_accel) * 2
+                # Increased reversal strength multiplier from 2 to 3 (new in iteration 8)
+                reversal_strength = abs(si_accel) * 3
                 # Direction: positive when SI decreasing, negative when SI increasing
                 si_reversal = -np.sign(si_history[2] - si_history[1]) * reversal_strength
             else:
                 # Continuation signal (weaker)
                 si_reversal = -np.sign(si_history[2] - si_history[1]) * abs(si_accel) * 0.5
             
-            eng.append(si_reversal)
+            # Apply sigmoid-like transformation to handle outliers
+            si_reversal_transformed = np.sign(si_reversal) * np.log1p(abs(si_reversal) * 5)
+            eng.append(si_reversal_transformed)
         else:
             eng.append(0.0)
         
-        # 11. Volume trend with exponential weighting
-        # High importance in previous iterations (Feature_21_t3)
+        # 9. Volume trend with exponential weighting
+        # High importance in iterations 5-6 (Feature_21_t3)
         if t >= 3:
             volumes = [data[max(0, t-i), 1] for i in range(3, -1, -1)]
             weights = np.exp(np.linspace(0, 1, len(volumes)))
@@ -314,12 +317,15 @@ def construct_features(data):
             
             # Normalize to recent average to detect relative changes
             volume_trend = avg_volume / max(weighted_volume, 1e-8)
-            eng.append(volume_trend)
+            
+            # Apply log transformation to handle skewness
+            volume_trend_log = np.log1p(volume_trend) if volume_trend > 0 else 0
+            eng.append(volume_trend_log)
         else:
-            eng.append(1.0)
+            eng.append(0.0)
         
-        # 12. Short interest to market cap proxy ratio
-        # High importance in previous iterations (Feature_17_t3)
+        # 10. Short interest to market cap proxy ratio
+        # High importance in iterations 5-7 (Feature_17_t3)
         if len(close_prices) >= 1:
             # Calculate market cap proxy
             market_cap_proxy = close_prices[-1] * avg_volume
@@ -328,36 +334,15 @@ def construct_features(data):
             si_to_mcap = short_interest / max(market_cap_proxy, 1e-8)
             
             # Log transform to handle skewness
-            si_to_mcap_log = np.log1p(si_to_mcap * 1000) if si_to_mcap > 0 else 0
+            # Increased scaling factor from 1000 to 2000 to better capture significant changes
+            si_to_mcap_log = np.log1p(si_to_mcap * 2000) if si_to_mcap > 0 else 0
             
             eng.append(si_to_mcap_log)
         else:
             eng.append(0.0)
         
-        # 13. Short interest relative to price volatility
-        # High importance in previous iterations (Feature_19_t3)
-        if len(close_prices) >= 10:
-            # Calculate price returns
-            returns = []
-            for i in range(1, 10):
-                ret = (close_prices[-i] / max(close_prices[-i-1], 1e-8)) - 1.0
-                returns.append(ret)
-            
-            # Calculate historical volatility
-            volatility = np.std(returns) if len(returns) > 1 else 0
-            
-            # Calculate short interest relative to volatility
-            si_to_vol = short_interest * volatility / max(avg_volume, 1e-8)
-            
-            # Log transform to handle skewness
-            si_to_vol_log = np.log1p(si_to_vol * 10) if si_to_vol > 0 else 0
-            
-            eng.append(si_to_vol_log)
-        else:
-            eng.append(0.0)
-        
-        # 14. Short interest momentum divergence
-        # High importance in previous iterations (Feature_20_t1)
+        # 11. Short interest momentum divergence
+        # High importance in iterations 5-6 (Feature_20_t1)
         if t >= 3 and len(close_prices) >= 5:
             # Get short interest history
             si_history = [data[max(0, t-i), 0] for i in range(3, -1, -1)]
@@ -373,15 +358,18 @@ def construct_features(data):
             divergence = -1 * si_momentum * price_momentum
             
             # Amplify signal when divergence is positive (true divergence)
+            # Increased amplification factor from 2 to 3 (new in iteration 8)
             if divergence > 0:
-                divergence *= 2
+                divergence *= 3
             
-            eng.append(divergence)
+            # Apply sigmoid-like transformation to handle outliers
+            divergence_transformed = np.sign(divergence) * np.log1p(abs(divergence) * 10)
+            eng.append(divergence_transformed)
         else:
             eng.append(0.0)
         
-        # 15. Short interest efficiency ratio
-        # High importance in previous iterations (Feature_18_t2)
+        # 12. Short interest efficiency ratio
+        # High importance in iterations 6-7 (Feature_18_t2)
         if t >= 5:
             # Get short interest history
             si_history = [data[max(0, t-i), 0] for i in range(5, -1, -1)]
@@ -401,17 +389,18 @@ def construct_features(data):
             
             # Transform to highlight extremes
             # Values close to 0 or 1 are more significant
+            # Improved transformation from iteration 7 to better capture extremes
             if efficiency < 0.5:
-                efficiency_transformed = -1 * (0.5 - efficiency) * 2  # -1 to 0
+                efficiency_transformed = -1 * np.power((0.5 - efficiency) * 2, 0.8)  # -1 to 0
             else:
-                efficiency_transformed = (efficiency - 0.5) * 2  # 0 to 1
+                efficiency_transformed = np.power((efficiency - 0.5) * 2, 0.8)  # 0 to 1
             
             eng.append(efficiency_transformed)
         else:
             eng.append(0.0)
         
-        # 16. Price-volume correlation (improved divergence detection)
-        # High importance in previous iterations (Feature_6_t3)
+        # 13. Price-volume correlation (improved divergence detection)
+        # High importance in iterations 6-7 (Feature_6_t3)
         if len(close_prices) >= 5 and t >= 4:
             # Get price and volume histories
             price_history = close_prices[-5:]
@@ -432,14 +421,245 @@ def construct_features(data):
                 correlation = matches / len(price_signs)
                 
                 # Transform to highlight divergence (-1 to 1 scale)
-                eng.append(correlation)
+                # Apply non-linear transformation to emphasize extremes (new in iteration 8)
+                correlation_transformed = np.sign(correlation) * np.power(abs(correlation), 0.7)
+                eng.append(correlation_transformed)
             else:
                 eng.append(0.0)
         else:
             eng.append(0.0)
         
-        # 17. NEW: Short interest relative to price range
-        # Combining insights from high-importance features in iterations 4-6
+        # 14. NEW: Relative short interest change vs. price change
+        # Combining insights from high-importance features in iterations 4-7
+        if t >= 5 and len(close_prices) >= 5:
+            # Get short interest and price histories
+            si_history = [data[max(0, t-i), 0] for i in range(5, -1, -1)]
+            price_history = close_prices[-6:]
+            
+            # Calculate percentage changes
+            si_pct_change = (si_history[-1] / max(si_history[0], 1e-8)) - 1.0
+            price_pct_change = (price_history[-1] / max(price_history[0], 1e-8)) - 1.0
+            
+            # Calculate relative change ratio
+            # Positive: SI increasing faster than price (or SI increasing while price decreasing)
+            # Negative: SI decreasing faster than price (or SI decreasing while price increasing)
+            relative_change = si_pct_change - price_pct_change
+            
+            # Apply sigmoid-like transformation to handle outliers
+            relative_change_transformed = np.sign(relative_change) * np.log1p(abs(relative_change) * 5)
+            
+            eng.append(relative_change_transformed)
+        else:
+            eng.append(0.0)
+        
+        # 15. NEW: Short interest volatility ratio
+        # Combining insights from high-importance features in iterations 4-7
+        if t >= 10:
+            # Get short interest history
+            si_history = [data[max(0, t-i), 0] for i in range(10, -1, -1)]
+            
+            # Calculate short-term and long-term volatility
+            short_term_si = si_history[-5:]
+            long_term_si = si_history
+            
+            # Calculate volatility (standard deviation / mean)
+            short_term_vol = np.std(short_term_si) / max(np.mean(short_term_si), 1e-8)
+            long_term_vol = np.std(long_term_si) / max(np.mean(long_term_si), 1e-8)
+            
+            # Calculate volatility ratio
+            # > 1: short-term volatility is higher than long-term (increasing uncertainty)
+            # < 1: short-term volatility is lower than long-term (decreasing uncertainty)
+            vol_ratio = short_term_vol / max(long_term_vol, 1e-8)
+            
+            # Apply log transformation to handle skewness
+            vol_ratio_log = np.log(vol_ratio) if vol_ratio > 0 else 0
+            
+            eng.append(vol_ratio_log)
+        else:
+            eng.append(0.0)
+        
+        # 16. NEW: Short interest regime change detection with volume confirmation
+        # Combining insights from high-importance features in iterations 4-7
+        if t >= 10:
+            # Get short interest and volume history
+            si_history = [data[max(0, t-i), 0] for i in range(10, -1, -1)]
+            volume_history = [data[max(0, t-i), 1] for i in range(10, -1, -1)]
+            
+            # Calculate moving averages for short interest
+            short_ma = np.mean(si_history[-3:])
+            long_ma = np.mean(si_history)
+            
+            # Calculate regime indicator
+            # Positive: short-term average > long-term average (increasing trend)
+            # Negative: short-term average < long-term average (decreasing trend)
+            regime = (short_ma / max(long_ma, 1e-8)) - 1.0
+            
+            # Calculate volume trend
+            recent_volume = np.mean(volume_history[-3:])
+            avg_volume = np.mean(volume_history)
+            volume_trend = (recent_volume / max(avg_volume, 1e-8)) - 1.0
+            
+            # Combine regime with volume confirmation
+            # Stronger signal when volume trend confirms short interest regime
+            if np.sign(regime) == np.sign(volume_trend):
+                regime_signal = regime * (1 + abs(volume_trend))
+            else:
+                regime_signal = regime * 0.5  # Weaker signal when volume doesn't confirm
+            
+            # Apply sigmoid-like transformation to handle outliers
+            regime_signal_transformed = np.sign(regime_signal) * np.log1p(abs(regime_signal) * 10)
+            
+            eng.append(regime_signal_transformed)
+        else:
+            eng.append(0.0)
+        
+        # 17. NEW: Short interest mean reversion potential
+        # Combining insights from high-importance features in iterations 4-7
+        if t >= 10:
+            # Get short interest history
+            si_history = [data[max(0, t-i), 0] for i in range(10, -1, -1)]
+            
+            # Calculate z-score of current short interest relative to history
+            si_mean = np.mean(si_history[:-1])  # Exclude current
+            si_std = np.std(si_history[:-1])
+            
+            # Z-score: how many standard deviations from the mean
+            z_score = (short_interest - si_mean) / max(si_std, 1e-8)
+            
+            # Calculate mean reversion potential
+            # Higher absolute z-score indicates higher mean reversion potential
+            # Sign indicates direction: negative z-score means potential increase, positive means potential decrease
+            reversion_potential = -1 * z_score  # Invert sign to indicate direction of expected movement
+            
+            # Apply sigmoid function to handle extreme values
+            reversion_potential_transformed = np.tanh(reversion_potential)
+            
+            eng.append(reversion_potential_transformed)
+        else:
+            eng.append(0.0)
+        
+        # 18. NEW: Short interest trend strength with price confirmation
+        # Combining insights from high-importance features in iterations 4-7
+        if t >= 5 and len(close_prices) >= 5:
+            # Get short interest and price histories
+            si_history = [data[max(0, t-i), 0] for i in range(5, -1, -1)]
+            price_history = close_prices[-6:]
+            
+            # Calculate linear regression slope for short interest
+            x = np.arange(len(si_history))
+            si_slope = np.polyfit(x, si_history, 1)[0]
+            si_slope_norm = si_slope / max(np.mean(si_history), 1e-8)
+            
+            # Calculate linear regression slope for price
+            price_slope = np.polyfit(x, price_history, 1)[0]
+            price_slope_norm = price_slope / max(np.mean(price_history), 1e-8)
+            
+            # Calculate trend strength with price confirmation
+            # Stronger signal when price trend confirms short interest trend
+            if np.sign(si_slope_norm) != np.sign(price_slope_norm):
+                # Divergence: short interest and price moving in opposite directions
+                # This is often a stronger signal
+                trend_strength = si_slope_norm * 2
+            else:
+                # Convergence: short interest and price moving in same direction
+                # This is often a weaker signal
+                trend_strength = si_slope_norm * 0.5
+            
+            # Apply sigmoid-like transformation to handle outliers
+            trend_strength_transformed = np.sign(trend_strength) * np.log1p(abs(trend_strength) * 20)
+            
+            eng.append(trend_strength_transformed)
+        else:
+            eng.append(0.0)
+        
+        # 19. NEW: Short interest volatility adjusted for price volatility
+        # Combining insights from high-importance features in iterations 4-7
+        if t >= 5 and len(close_prices) >= 5:
+            # Get short interest and price histories
+            si_history = [data[max(0, t-i), 0] for i in range(5, -1, -1)]
+            price_history = close_prices[-6:]
+            
+            # Calculate volatility (coefficient of variation)
+            si_vol = np.std(si_history) / max(np.mean(si_history), 1e-8)
+            price_vol = np.std(price_history) / max(np.mean(price_history), 1e-8)
+            
+            # Calculate relative volatility
+            # > 1: short interest more volatile than price
+            # < 1: price more volatile than short interest
+            rel_vol = si_vol / max(price_vol, 1e-8)
+            
+            # Apply log transformation to handle skewness
+            rel_vol_log = np.log(rel_vol) if rel_vol > 0 else 0
+            
+            eng.append(rel_vol_log)
+        else:
+            eng.append(0.0)
+        
+        # 20. NEW: Short interest momentum with volume confirmation
+        # Combining insights from high-importance features in iterations 4-7
+        if t >= 3:
+            # Get short interest and volume histories
+            si_history = [data[max(0, t-i), 0] for i in range(3, -1, -1)]
+            volume_history = [data[max(0, t-i), 1] for i in range(3, -1, -1)]
+            
+            # Calculate short interest momentum
+            si_momentum = (si_history[-1] - si_history[0]) / max(si_history[0], 1e-8)
+            
+            # Calculate volume momentum
+            volume_momentum = (volume_history[-1] - volume_history[0]) / max(volume_history[0], 1e-8)
+            
+            # Combine short interest momentum with volume confirmation
+            # Stronger signal when volume confirms short interest movement
+            if np.sign(si_momentum) == np.sign(volume_momentum):
+                # Volume confirms short interest movement
+                momentum_signal = si_momentum * (1 + abs(volume_momentum))
+            else:
+                # Volume contradicts short interest movement
+                momentum_signal = si_momentum * 0.5
+            
+            # Apply sigmoid-like transformation to handle outliers
+            momentum_signal_transformed = np.sign(momentum_signal) * np.log1p(abs(momentum_signal) * 10)
+            
+            eng.append(momentum_signal_transformed)
+        else:
+            eng.append(0.0)
+        
+        # 21. NEW: Short interest trend stability
+        # Combining insights from high-importance features in iterations 4-7
+        if t >= 10:
+            # Get short interest history
+            si_history = [data[max(0, t-i), 0] for i in range(10, -1, -1)]
+            
+            # Calculate consecutive movements in same direction
+            consecutive_same_dir = 0
+            max_consecutive = 0
+            
+            for i in range(1, len(si_history)):
+                current_dir = np.sign(si_history[i] - si_history[i-1])
+                
+                if i > 1:
+                    prev_dir = np.sign(si_history[i-1] - si_history[i-2])
+                    if current_dir == prev_dir and current_dir != 0:
+                        consecutive_same_dir += 1
+                    else:
+                        consecutive_same_dir = 0
+                
+                max_consecutive = max(max_consecutive, consecutive_same_dir)
+            
+            # Calculate trend stability (0 to 1)
+            # Higher values indicate more stable trend
+            trend_stability = max_consecutive / (len(si_history) - 1)
+            
+            # Transform to highlight extremes (-1 to 1 scale)
+            # Negative: unstable trend, Positive: stable trend
+            trend_stability_transformed = 2 * trend_stability - 1
+            
+            eng.append(trend_stability_transformed)
+        else:
+            eng.append(0.0)
+        
+        # 22. NEW: Short interest to price range ratio
+        # Combining insights from high-importance features in iterations 4-7
         if len(close_prices) >= 10:
             # Calculate price range
             price_range = (np.max(high_prices[-10:]) - np.min(low_prices[-10:])) / max(np.mean(close_prices[-10:]), 1e-8)
@@ -451,171 +671,6 @@ def construct_features(data):
             si_to_range_log = np.log1p(si_to_range * 10) if si_to_range > 0 else 0
             
             eng.append(si_to_range_log)
-        else:
-            eng.append(0.0)
-        
-        # 18. NEW: Short interest regime change detection
-        # Combining insights from high-importance features in iterations 4-6
-        if t >= 10:
-            # Get short interest history
-            si_history = [data[max(0, t-i), 0] for i in range(10, -1, -1)]
-            
-            # Calculate moving averages
-            short_ma = np.mean(si_history[-3:])
-            long_ma = np.mean(si_history)
-            
-            # Calculate regime indicator
-            # Positive: short-term average > long-term average (increasing trend)
-            # Negative: short-term average < long-term average (decreasing trend)
-            regime = (short_ma / max(long_ma, 1e-8)) - 1.0
-            
-            # Calculate rate of regime change
-            if t >= 11:
-                prev_si_history = [data[max(0, t-1-i), 0] for i in range(10, -1, -1)]
-                prev_short_ma = np.mean(prev_si_history[-3:])
-                prev_long_ma = np.mean(prev_si_history)
-                prev_regime = (prev_short_ma / max(prev_long_ma, 1e-8)) - 1.0
-                
-                # Regime change acceleration
-                regime_change = regime - prev_regime
-                
-                # Transform to highlight significant regime changes
-                regime_change_transformed = np.sign(regime_change) * np.log1p(abs(regime_change) * 20)
-                
-                eng.append(regime_change_transformed)
-            else:
-                eng.append(0.0)
-        else:
-            eng.append(0.0)
-        
-        # 19. NEW: Short interest volatility adjusted for trend
-        # Combining insights from high-importance features in iterations 4-6
-        if t >= 5:
-            # Get short interest history
-            si_history = [data[max(0, t-i), 0] for i in range(5, -1, -1)]
-            
-            # Calculate short interest returns
-            si_returns = []
-            for i in range(1, len(si_history)):
-                ret = (si_history[i] / max(si_history[i-1], 1e-8)) - 1.0
-                si_returns.append(ret)
-            
-            # Calculate volatility (standard deviation of returns)
-            si_volatility = np.std(si_returns) if len(si_returns) > 1 else 0
-            
-            # Calculate trend
-            si_trend = (si_history[-1] / max(si_history[0], 1e-8)) - 1.0
-            
-            # Adjust volatility based on trend direction
-            # Higher values when volatility is high and trend is negative (potential short covering)
-            # Lower values when volatility is high and trend is positive (potential short selling)
-            volatility_adjusted = si_volatility * (-1 * si_trend)
-            
-            # Transform to highlight significant values
-            volatility_adjusted_transformed = np.sign(volatility_adjusted) * np.log1p(abs(volatility_adjusted) * 20)
-            
-            eng.append(volatility_adjusted_transformed)
-        else:
-            eng.append(0.0)
-        
-        # 20. NEW: Short interest relative to volume volatility
-        # Combining insights from high-importance features in iterations 4-6
-        if t >= 5:
-            # Get volume history
-            volume_history = [data[max(0, t-i), 1] for i in range(5, -1, -1)]
-            
-            # Calculate volume returns
-            volume_returns = []
-            for i in range(1, len(volume_history)):
-                ret = (volume_history[i] / max(volume_history[i-1], 1e-8)) - 1.0
-                volume_returns.append(ret)
-            
-            # Calculate volume volatility
-            volume_volatility = np.std(volume_returns) if len(volume_returns) > 1 else 0
-            
-            # Calculate short interest relative to volume volatility
-            si_to_vol_vol = short_interest * volume_volatility / max(avg_volume, 1e-8)
-            
-            # Log transform to handle skewness
-            si_to_vol_vol_log = np.log1p(si_to_vol_vol * 10) if si_to_vol_vol > 0 else 0
-            
-            eng.append(si_to_vol_vol_log)
-        else:
-            eng.append(0.0)
-        
-        # 21. NEW: Short interest relative to price momentum extremes
-        # Combining insights from high-importance features in iterations 4-6
-        if len(close_prices) >= 10:
-            # Calculate price momentum
-            momentum = (close_prices[-1] / max(close_prices[-10], 1e-8)) - 1.0
-            
-            # Transform momentum to highlight extremes
-            momentum_transformed = 0.0
-            if momentum < -0.1:  # Significant negative momentum
-                momentum_transformed = -1.0 * (abs(momentum) * 10)  # Amplify negative momentum
-            elif momentum > 0.1:  # Significant positive momentum
-                momentum_transformed = momentum * 10  # Amplify positive momentum
-            else:
-                momentum_transformed = momentum * 5  # Less weight for small momentum
-            
-            # Calculate short interest relative to transformed momentum
-            si_to_momentum = short_interest * (-1 * momentum_transformed) / max(avg_volume, 1e-8)
-            
-            # Transform to highlight extreme values
-            si_to_momentum_transformed = np.sign(si_to_momentum) * np.log1p(abs(si_to_momentum) * 10)
-            
-            eng.append(si_to_momentum_transformed)
-        else:
-            eng.append(0.0)
-        
-        # 22. NEW: Candlestick pattern strength with volume confirmation
-        # Combining insights from high-importance features in iterations 4-6
-        if len(close_prices) >= 3 and len(open_prices) >= 3:
-            # Calculate candle body and range for last 3 days
-            bodies = []
-            ranges = []
-            for i in range(3):
-                body = abs(close_prices[-i-1] - open_prices[-i-1])
-                price_range = max(high_prices[-i-1] - low_prices[-i-1], 1e-8)
-                bodies.append(body)
-                ranges.append(price_range)
-            
-            # Calculate body to range ratios
-            body_ratios = [bodies[i] / ranges[i] for i in range(3)]
-            
-            # Calculate pattern strength based on sequence of body ratios
-            # Strong patterns often show specific sequences (e.g., small-large-small)
-            pattern_strength = 0.0
-            
-            # Trend reversal pattern: small-large-small with direction change
-            if body_ratios[0] < 0.3 and body_ratios[1] > 0.6 and body_ratios[2] < 0.3:
-                # Check for direction change
-                if (close_prices[-3] > open_prices[-3] and close_prices[-2] < open_prices[-2]) or \
-                   (close_prices[-3] < open_prices[-3] and close_prices[-2] > open_prices[-2]):
-                    pattern_strength = 1.0
-            
-            # Continuation pattern: three consecutive strong candles in same direction
-            if all(ratio > 0.6 for ratio in body_ratios):
-                # Check for same direction
-                if (all(close_prices[-i-1] > open_prices[-i-1] for i in range(3))) or \
-                   (all(close_prices[-i-1] < open_prices[-i-1] for i in range(3))):
-                    pattern_strength = 0.8
-            
-            # Volume confirmation
-            if t >= 2:
-                recent_volumes = [data[max(0, t-i), 1] for i in range(3)]
-                # Increasing volume strengthens the pattern
-                if recent_volumes[0] > recent_volumes[1] > recent_volumes[2]:
-                    pattern_strength *= 1.5
-            
-            # Direction: positive for bullish patterns, negative for bearish
-            if pattern_strength > 0:
-                if close_prices[-1] > open_prices[-1]:  # Bullish
-                    pattern_strength = pattern_strength
-                else:  # Bearish
-                    pattern_strength = -pattern_strength
-            
-            eng.append(pattern_strength)
         else:
             eng.append(0.0)
         
@@ -641,9 +696,9 @@ def construct_features(data):
     return features
 ```
 
-Performance of this code: MAPE = 7.20%
-Change from previous: -0.60%
-Statistical Analysis: 57/100 features were significant (p < 0.05), 47 were highly significant (p < 0.01)
+Performance of this code: MAPE = 7.28%
+Change from previous: -0.68%
+Statistical Analysis: 42/100 features were significant (p < 0.05), 34 were highly significant (p < 0.01)
 
 INSTRUCTIONS FOR NEW CODE:
 - Analyze the previous code and understand what features it tried to create
@@ -654,7 +709,7 @@ INSTRUCTIONS FOR NEW CODE:
 - Think about what additional financial insights or technical indicators could be valuable
 
 
-CURRENT TASK (Iteration 8):
+CURRENT TASK (Iteration 9):
 Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 6.60%.
 
 ### Strategy

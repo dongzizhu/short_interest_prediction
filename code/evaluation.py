@@ -317,7 +317,7 @@ class ValidationTester:
         self.config = config
     
     def test_universal_feature_engineering(self, universal_function: callable, 
-                                        tickers: List[str], 
+                                        tickers: List[str], model_type: str,
                                         data_loader, model_trainer) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
         """Test the universal feature engineering code on multiple tickers and measure performance."""
         print(f"\n{'='*80}")
@@ -345,18 +345,22 @@ class ValidationTester:
                     continue
                     
                 X_train_raw = raw_data['X_train_raw']
+                X_val_raw = raw_data['X_val_raw']
                 X_test_raw = raw_data['X_test_raw']
                 y_train = raw_data['y_train']
+                y_val = raw_data['y_val']
                 y_test = raw_data['y_test']
                 prev_log_test = raw_data['prev_log_test']
                 
-                print(f"✅ Data loaded: Train={X_train_raw.shape}, Test={X_test_raw.shape}")
+                X_train_val_raw = np.concatenate([X_train_raw, X_val_raw], axis=0)
+                y_train_val = np.concatenate([y_train, y_val], axis=0)
+                print(f"✅ Data loaded: Train+Val={X_train_val_raw.shape}, Test={X_test_raw.shape}")
                 
                 # 1. Train baseline model (raw features)
                 print(f"\n🎯 Training baseline model for {ticker}...")
                 baseline_results = model_trainer.train_and_evaluate_model(
-                    X_train_raw, X_test_raw, y_train, y_test, prev_log_test,
-                    model_name=f"Baseline {ticker}", epochs=30  # Reduced epochs for faster testing
+                    X_train_val_raw, X_test_raw, y_train_val, y_test, prev_log_test,
+                    model_name=f"Baseline {ticker}", epochs=200, model_type=model_type  # Reduced epochs for faster testing
                 )
                 
                 # 2. Apply universal feature engineering
@@ -372,8 +376,8 @@ class ValidationTester:
                 dummy_llm_config = LLMConfig(api_key="dummy")
                 feature_selector = IterativeLLMFeatureSelector(dummy_llm_config)
                 
-                X_train_processed, train_errors = feature_selector.apply_feature_selection_to_data(
-                    X_train_raw, universal_function, max_retries=3
+                X_train_val_processed, train_errors = feature_selector.apply_feature_selection_to_data(
+                    X_train_val_raw, universal_function, max_retries=3
                 )
                 X_test_processed, test_errors = feature_selector.apply_feature_selection_to_data(
                     X_test_raw, universal_function, max_retries=3
@@ -382,13 +386,13 @@ class ValidationTester:
                 if len(train_errors) > 0 or len(test_errors) > 0:
                     print(f"⚠️ Some errors in feature engineering: {len(train_errors)} train, {len(test_errors)} test")
                 
-                print(f"Feature engineering: {X_train_raw.shape} -> {X_train_processed.shape}")
+                print(f"Feature engineering: {X_train_val_raw.shape} -> {X_train_val_processed.shape}")
                 
                 # 3. Train enhanced model (processed features)
                 print(f"\n🚀 Training enhanced model for {ticker}...")
                 enhanced_results = model_trainer.train_and_evaluate_model(
-                    X_train_processed, X_test_processed, y_train, y_test, prev_log_test,
-                    model_name=f"Enhanced {ticker}", epochs=30
+                    X_train_val_processed, X_test_processed, y_train_val, y_test, prev_log_test,
+                    model_name=f"Enhanced {ticker}", epochs=200, model_type=model_type
                 )
                 
                 # 4. Calculate improvements
@@ -410,8 +414,8 @@ class ValidationTester:
                     'baseline_rmse': baseline_results['rmse'],
                     'enhanced_rmse': enhanced_results['rmse'],
                     'rmse_improvement': rmse_improvement,
-                    'feature_count_baseline': X_train_raw.shape[2],
-                    'feature_count_enhanced': X_train_processed.shape[2],
+                    'feature_count_baseline': X_train_val_raw.shape[2],
+                    'feature_count_enhanced': X_train_val_processed.shape[2],
                     'train_errors': len(train_errors),
                     'test_errors': len(test_errors)
                 }
@@ -423,7 +427,7 @@ class ValidationTester:
                 print(f"  Baseline MAPE: {baseline_results['mape']:.2f}%")
                 print(f"  Enhanced MAPE: {enhanced_results['mape']:.2f}%")
                 print(f"  MAPE Improvement: {mape_improvement:+.2f}% ({relative_mape_improvement:+.1f}%)")
-                print(f"  Features: {X_train_raw.shape[2]} -> {X_train_processed.shape[2]}")
+                print(f"  Features: {X_train_val_raw.shape[2]} -> {X_train_val_processed.shape[2]}")
                 
             except Exception as e:
                 print(f"❌ Error testing {ticker}: {e}")

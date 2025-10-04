@@ -92,7 +92,8 @@ class IterativeFeatureSelectionPipeline:
         print("\n🎯 Step 1: Running baseline model on validation set...")
         baseline_results = self.model_trainer.train_and_evaluate_model(
             X_train_raw, X_val_raw, y_train, y_val, prev_log_val, 
-            model_name="Baseline (All 62 Features)", epochs=self.config.model.epochs
+            model_name="Baseline (All 62 Features)", epochs=self.config.model.epochs,
+            model_type=self.config.model.model_type
         )
         
         baseline_mape = baseline_results['mape']
@@ -294,7 +295,8 @@ class IterativeFeatureSelectionPipeline:
             # Train on training set and evaluate on validation set
             iteration_results_model = self.model_trainer.train_and_evaluate_model(
                 X_train_processed, X_val_processed, y_train, y_val, prev_log_val,
-                model_name=f"Iteration {iteration} ({function_source})", epochs=self.config.model.epochs
+                model_name=f"Iteration {iteration} ({function_source})", epochs=self.config.model.epochs,
+                model_type=self.config.model.model_type
             )
             
             # Calculate improvement
@@ -362,7 +364,6 @@ class IterativeFeatureSelectionPipeline:
         # Combine training and validation sets for final model training
         X_train_val_raw = np.concatenate([X_train_raw, X_val_raw], axis=0)
         y_train_val = np.concatenate([y_train, y_val], axis=0)
-        prev_log_train_val = np.concatenate([prev_log_train, prev_log_val], axis=0)
         
         print(f"Combined train+val data shape: {X_train_val_raw.shape}")
         print(f"Test data shape: {X_test_raw.shape}")
@@ -374,7 +375,8 @@ class IterativeFeatureSelectionPipeline:
         print(f"\n📊 BASELINE EVALUATION (Raw Features, Train+Val → Test):")
         baseline_final_results = self.model_trainer.train_and_evaluate_model(
             X_train_val_raw, X_test_raw, y_train_val, y_test, prev_log_test,
-            model_name="Baseline Final (Raw Features)", epochs=self.config.model.epochs
+            model_name="Baseline Final (Raw Features)", epochs=self.config.model.epochs,
+            model_type=self.config.model.model_type
         )
         
         print(f"   Baseline MAPE: {baseline_final_results['mape']:.2f}%")
@@ -407,7 +409,8 @@ class IterativeFeatureSelectionPipeline:
                     # Final evaluation with processed features
                     final_test_results = self.model_trainer.train_and_evaluate_model(
                         X_train_val_processed, X_test_processed_final, y_train_val, y_test, prev_log_test,
-                        model_name="Best Model Final (Processed Features)", epochs=self.config.model.epochs
+                        model_name="Best Model Final (Processed Features)", epochs=self.config.model.epochs,
+                        model_type=self.config.model.model_type
                     )
                     
                     print(f"\n📊 Best Model Test Set Performance:")
@@ -451,17 +454,17 @@ class IterativeFeatureSelectionPipeline:
         
         # Create simple performance table
         print(f"\n📊 VALIDATION MAPE TREND:")
-        print("-" * 50)
-        print(f"{'Iteration':<10} {'Model':<25} {'Validation MAPE':<15} {'Improvement':<12}")
-        print("-" * 50)
+        print("-" * 80)
+        print(f"{'Iteration':<10} {'Model':<25} {'Validation MAPE':<15} {'Improvement from Last':<20}")
+        print("-" * 80)
         
         for result in iteration_results:
-            improvement_str = f"{result['improvement']:+.2f}%" if result['improvement'] != 0 else "Baseline"
-            print(f"{result['iteration']:<10} {result['model_name']:<25} {result['mape']:<15.2f} {improvement_str:<12}")
+            improvement_str = f"{result['improvement']:+.2f}%" if result['improvement'] != 0 else "N/A"
+            print(f"{result['iteration']:<10} {result['model_name']:<25} {result['mape']:<15.2f} {improvement_str:<20}")
         
         # Find best result
         best_result = min(iteration_results[1:], key=lambda x: x['mape'])
-        print("-" * 50)
+        print("-" * 80)
         print(f"🏆 Best: {best_result['model_name']} - MAPE: {best_result['mape']:.2f}%")
 
         # Save results
@@ -469,9 +472,9 @@ class IterativeFeatureSelectionPipeline:
             self._save_ticker_results(ticker, best_result, iteration_codes, iteration_results)
         
         print(f"\n🎉 Process completed successfully for {ticker}!")
-        
-        return best_result, iteration_codes
-    
+
+        return iteration_results[0], best_result, iteration_codes
+
     def _save_ticker_results(self, ticker: str, best_result: Dict[str, Any], 
                            iteration_codes: Dict[str, Any], iteration_results: List[Dict[str, Any]]) -> None:
         """Save results for a single ticker."""
@@ -503,6 +506,7 @@ class IterativeFeatureSelectionPipeline:
         
         # Dictionary to store results for each ticker
         ticker_results = {}
+        ticker_baseline_results = {}
         
         # Process each ticker for iterative feature engineering
         for i, ticker in enumerate(iterative_tickers, 1):
@@ -511,8 +515,9 @@ class IterativeFeatureSelectionPipeline:
             print(f"{'='*80}")
             
             try:
-                best_result, iteration_codes = self.run_iterative_process_for_ticker(ticker)
+                baseline_result, best_result, iteration_codes = self.run_iterative_process_for_ticker(ticker)
                 ticker_results[ticker] = (best_result, iteration_codes)
+                ticker_baseline_results[ticker] = baseline_result
                 
             except Exception as e:
                 print(f"❌ Error processing {ticker}: {e}")
@@ -569,7 +574,7 @@ class IterativeFeatureSelectionPipeline:
         for ticker, (best_result, iteration_codes) in ticker_results.items():
             print(f"\n{ticker}:")
             print(f"  Best MAPE: {best_result['mape']:.2f}%")
-            print(f"  Improvement: {best_result.get('improvement', 0):+.2f}%")
+            print(f"  Improvement: {ticker_baseline_results[ticker]['mape'] - best_result['mape']:.2f}%")
             print(f"  Feature count: {best_result.get('feature_count', 'Unknown')}")
             print(f"  Iterations: {len(iteration_codes)}")
         
@@ -583,7 +588,7 @@ class IterativeFeatureSelectionPipeline:
             
             # Test on all available tickers
             validation_results, successful_tickers, failed_tickers = self.validation_tester.test_universal_feature_engineering(
-                universal_function, validation_tickers, self.data_loader, self.model_trainer
+                universal_function, validation_tickers, self.config.model.model_type, self.data_loader, self.model_trainer
             )
             
             # Generate comprehensive performance report

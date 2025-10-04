@@ -13,26 +13,27 @@ Total: 1 + 1 + 60 = 62 features per timestamp.
 
 ## Dataset constraints
 - Only ~180 total samples available (very small).
-- To reduce overfitting: **keep ALL 62 raw features** and add **new features** so that **(raw + new) ≤ 85 total columns**.
+- To reduce overfitting: **keep only the useful raw channels** and add **new features** so that **(kept raw + new) ≤ 25 total columns**.
+- You **may drop** raw channels with consistently low importance or redundancy after the second iteration.
 - Avoid redundant or near-duplicate engineered features. Prefer a small, diverse set.
 
 
 
 PERFORMANCE HISTORY:
-Iteration 0: Baseline - MAPE: 9.77%
+Iteration 0: Baseline - MAPE: 7.37%
   Features: All 62 original features
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_0 (importance=0.0241), Feature_1 (importance=0.0058), Feature_52 (importance=0.0011), Feature_58 (importance=0.0011), Feature_12 (importance=0.0008)
+    • Top important features: Feature_6_t3 (importance=0.0009), Feature_1_t3 (importance=0.0009), Feature_35_t3 (importance=0.0007), Feature_3_t3 (importance=0.0007), Feature_0_t0 (importance=0.0006)
 
-Iteration 1: Iteration 1 - MAPE: 9.09% (Improvement Over Baseline: +0.7%) (Improvement Over Last: +0.7%)
+Iteration 1: Iteration 1 - MAPE: 8.67% (Improvement Over Baseline: -1.3%) (Improvement Over Last: -1.3%)
   Features: claude feature engineering
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_0 (importance=0.0323), Feature_1 (importance=0.0046), Feature_14 (importance=0.0016), Feature_17 (importance=0.0008), Feature_46 (importance=0.0007)
+    • Top important features: Feature_6_t3 (importance=0.0079), Feature_14_t1 (importance=0.0042), Feature_1_t1 (importance=0.0035), Feature_18_t0 (importance=0.0027), Feature_11_t0 (importance=0.0025)
 
-Iteration 2: Iteration 2 - MAPE: 7.98% (Improvement Over Baseline: +1.1%) (Improvement Over Last: +1.1%)
+Iteration 2: Iteration 2 - MAPE: 9.52% (Improvement Over Baseline: -2.1%) (Improvement Over Last: -0.8%)
   Features: claude feature engineering
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_0 (importance=0.0368), Feature_1 (importance=0.0078), Feature_27 (importance=0.0009), Feature_14 (importance=0.0005), Feature_25 (importance=0.0005)
+    • Top important features: Feature_10_t3 (importance=0.0144), Feature_17_t3 (importance=0.0089), Feature_9_t3 (importance=0.0049), Feature_2_t1 (importance=0.0044), Feature_16_t1 (importance=0.0039)
 
 
 
@@ -47,264 +48,255 @@ The following code was used in the most recent iteration (Iteration 2):
 
 ```python
 def construct_features(data):
-    """
-    Construct features for short interest prediction.
-    
-    Args:
-        data: numpy array of shape (lookback_window, 62)
-        
-    Returns:
-        numpy array of shape (lookback_window, MAX_TOTAL)
-    """
     RAW_DIM = 62
-    MAX_TOTAL = 85
-    MAX_NEW = MAX_TOTAL - RAW_DIM
+    MAX_TOTAL = 25
     
     lookback_window = data.shape[0]
-    result = []
+    features = np.zeros((lookback_window, MAX_TOTAL), dtype=np.float32)
     
     for t in range(lookback_window):
-        # Keep all raw features
-        raw_keep = list(data[t])
+        # Extract raw data for this timestep
+        short_interest = data[t, 0]
+        avg_volume = data[t, 1]
+        ohlc = data[t, 2:].reshape(15, 4)
+        open_prices, high_prices, low_prices, close_prices = ohlc[:, 0], ohlc[:, 1], ohlc[:, 2], ohlc[:, 3]
+        
+        # Keep essential raw features (based on importance analysis)
+        # Keeping fewer raw features to make room for more engineered features
+        raw_keep = [
+            short_interest,  # Always keep short interest (highest importance)
+            avg_volume,      # Always keep average volume (high importance)
+            close_prices[-1],  # Most recent close price
+            high_prices[-1],   # Most recent high price
+            low_prices[-1],    # Most recent low price
+        ]
+        
+        # Calculate MAX_NEW based on raw features kept
+        MAX_NEW = MAX_TOTAL - len(raw_keep)
         
         # Initialize engineered features list
         eng = []
         
-        # Extract short interest and volume
-        short_interest = data[t, 0]
-        avg_volume = data[t, 1]
+        # 1. Short Interest Specific Features (prioritized based on importance)
         
-        # Reshape OHLC data
-        ohlc = data[t, 2:].reshape(15, 4)
-        open_prices, high_prices, low_prices, close_prices = ohlc[:, 0], ohlc[:, 1], ohlc[:, 2], ohlc[:, 3]
+        # Short interest to volume ratio (high importance in previous iteration)
+        si_volume_ratio = short_interest / max(avg_volume, 1e-8)
+        eng.append(si_volume_ratio)
         
-        # 1. Days to Cover - consistently high importance in previous iterations
-        # Measures how many days of average volume would be needed to cover all short positions
-        days_to_cover = short_interest / max(avg_volume, 1e-8)
-        eng.append(days_to_cover)
-        
-        # 2. Short Interest Change Rate - if we have previous data
-        # Captures momentum in short interest changes
-        si_change = 0
+        # Short interest momentum (change over time if we have previous data)
         if t > 0:
             prev_si = data[t-1, 0]
             si_change = (short_interest - prev_si) / max(prev_si, 1e-8)
-        eng.append(si_change)
-        
-        # 3. Short Interest Acceleration - second derivative of short interest
-        # Captures acceleration/deceleration in short interest changes
-        si_accel = 0
-        if t > 1:
-            prev_si_change = (data[t-1, 0] - data[t-2, 0]) / max(data[t-2, 0], 1e-8)
-            si_accel = si_change - prev_si_change
-        eng.append(si_accel)
-        
-        # 4. Normalized Short Interest - relative to historical levels
-        # Provides context for current short interest relative to recent history
-        si_history = data[:t+1, 0]
-        normalized_si = short_interest / max(np.mean(si_history), 1e-8)
-        eng.append(normalized_si)
-        
-        # 5. Short Interest Percentile Rank
-        # Provides relative position of current SI in historical distribution
-        si_rank = 0.5  # Default to middle if not enough history
-        if t >= 4:  # Need some history to make this meaningful
-            si_history = data[:t+1, 0]
-            si_rank = np.sum(si_history < short_interest) / max(len(si_history), 1)
-        eng.append(si_rank)
-        
-        # 6. Price Volatility (15-day)
-        # Volatility is often correlated with short interest
-        returns = np.diff(close_prices) / np.maximum(close_prices[:-1], 1e-8)
-        volatility = np.std(returns) if len(returns) > 1 else 0
-        eng.append(volatility)
-        
-        # 7. Average True Range (ATR) - measure of volatility that accounts for gaps
-        tr_values = []
-        for i in range(1, len(close_prices)):
-            high_low = high_prices[i] - low_prices[i]
-            high_close_prev = abs(high_prices[i] - close_prices[i-1])
-            low_close_prev = abs(low_prices[i] - close_prices[i-1])
-            tr = max(high_low, high_close_prev, low_close_prev)
-            tr_values.append(tr)
-        atr = np.mean(tr_values) if tr_values else 0
-        eng.append(atr)
-        
-        # 8. ATR to Price Ratio - normalized volatility
-        # Makes ATR comparable across different price levels
-        avg_price = np.mean(close_prices) if len(close_prices) > 0 else 1
-        atr_price_ratio = atr / max(avg_price, 1e-8)
-        eng.append(atr_price_ratio)
-        
-        # 9. RSI (Relative Strength Index) - momentum indicator
-        # Improved calculation with proper up/down day separation
-        up_moves = np.zeros(len(returns))
-        down_moves = np.zeros(len(returns))
-        
-        if len(returns) > 0:
-            up_moves[returns > 0] = returns[returns > 0]
-            down_moves[returns < 0] = -returns[returns < 0]
+            eng.append(si_change)
             
-            avg_up = np.mean(up_moves) if np.sum(up_moves > 0) > 0 else 0
-            avg_down = np.mean(down_moves) if np.sum(down_moves > 0) > 0 else 0
+            # Add acceleration of short interest (second derivative)
+            if t > 1:
+                prev_prev_si = data[t-2, 0]
+                prev_si_change = (prev_si - prev_prev_si) / max(prev_prev_si, 1e-8)
+                si_acceleration = si_change - prev_si_change
+                eng.append(si_acceleration)
+            else:
+                eng.append(0.0)
+        else:
+            eng.append(0.0)  # No previous data
+            eng.append(0.0)  # No acceleration data
+        
+        # Short interest to float ratio proxy (using volume as proxy for float)
+        # Modified to use a more realistic float estimation
+        si_float_proxy = short_interest / max(avg_volume * 30, 1e-8)  # 30 days as proxy for float
+        eng.append(si_float_proxy)
+        
+        # 2. Price Momentum and Volatility Features
+        
+        # 5-day price momentum (ratio of latest close to 5 days ago close)
+        if len(close_prices) >= 5:
+            price_momentum_5d = close_prices[-1] / max(close_prices[-5], 1e-8) - 1.0
+            eng.append(price_momentum_5d)
+        else:
+            eng.append(0.0)
             
-            rs = avg_up / max(avg_down, 1e-8)
+        # Volatility: normalized price range over last 5 days
+        if len(close_prices) >= 5:
+            recent_high = np.max(high_prices[-5:])
+            recent_low = np.min(low_prices[-5:])
+            avg_price = np.mean(close_prices[-5:])
+            normalized_range = (recent_high - recent_low) / max(avg_price, 1e-8)
+            eng.append(normalized_range)
+        else:
+            eng.append(0.0)
+        
+        # 3. Technical Indicators (refined based on importance)
+        
+        # RSI (14-day) - simplified but more robust implementation
+        if len(close_prices) >= 14:
+            deltas = np.diff(close_prices[-14:])
+            gains = np.where(deltas > 0, deltas, 0)
+            losses = np.where(deltas < 0, -deltas, 0)
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            rs = avg_gain / max(avg_loss, 1e-8)
             rsi = 100 - (100 / (1 + rs))
+            eng.append(rsi / 100.0)  # Normalize to 0-1 range
         else:
-            rsi = 50  # Neutral if not enough data
-        eng.append(rsi)
+            eng.append(0.5)  # Neutral RSI value
         
-        # 10. Price Trend (linear regression slope)
-        # Trend direction can influence short interest
-        if len(close_prices) > 3:  # Need at least a few points for meaningful slope
-            x = np.arange(len(close_prices))
-            slope, _ = np.polyfit(x, close_prices, 1) if len(close_prices) > 1 else (0, 0)
-            # Normalize slope by average price to make comparable across stocks
-            norm_slope = slope / max(avg_price, 1e-8)
+        # Bollinger Band Width - measure of volatility
+        if len(close_prices) >= 10:
+            sma = np.mean(close_prices[-10:])
+            std = np.std(close_prices[-10:])
+            bb_width = (2 * std) / max(sma, 1e-8)
+            eng.append(bb_width)
         else:
-            norm_slope = 0
-        eng.append(norm_slope)
+            eng.append(0.0)
         
-        # 11. Price to Moving Average Ratio - price relative to trend
-        # Indicates overbought/oversold conditions
-        sma_5 = np.mean(close_prices[-5:]) if len(close_prices) >= 5 else np.mean(close_prices)
-        price_to_sma = close_prices[-1] / max(sma_5, 1e-8)
-        eng.append(price_to_sma)
+        # 4. Volume-Price Relationship Features
         
-        # 12. Volume Trend - volume changes can signal short interest changes
-        # Improved calculation using actual volume trend
-        vol_trend = 0
-        if len(close_prices) > 5:
-            # Proxy for volume trend using price-volume relationship
-            vol_trend = (avg_volume - np.mean(close_prices[-5:] * avg_volume / max(close_prices[-1], 1e-8))) / max(avg_volume, 1e-8)
-        eng.append(vol_trend)
-        
-        # 13. Bollinger Band Width - volatility measure
-        # Wider bands indicate higher volatility
-        if len(close_prices) > 3:
-            sma_all = np.mean(close_prices)
-            std_all = np.std(close_prices)
-            bb_width = (2 * std_all) / max(sma_all, 1e-8)
+        # On-Balance Volume trend (simplified)
+        if len(close_prices) >= 5:
+            obv_proxy = 0
+            for i in range(-5, 0):
+                if i > -len(close_prices):
+                    if i < -1 and close_prices[i] > close_prices[i-1]:
+                        obv_proxy += avg_volume / 15  # Daily volume approximation
+                    elif i < -1 and close_prices[i] < close_prices[i-1]:
+                        obv_proxy -= avg_volume / 15
+            # Normalize OBV
+            obv_normalized = obv_proxy / max(avg_volume, 1e-8)
+            eng.append(obv_normalized)
         else:
-            bb_width = 0
-        eng.append(bb_width)
+            eng.append(0.0)
         
-        # 14. Bollinger Band Position - where price is within the bands
-        # Indicates potential mean reversion or trend continuation
-        if len(close_prices) > 3:
-            upper_band = sma_all + 2 * std_all
-            lower_band = sma_all - 2 * std_all
-            band_range = upper_band - lower_band
-            if band_range > 0:
-                bb_position = (close_prices[-1] - lower_band) / max(band_range, 1e-8)
-            else:
-                bb_position = 0.5
+        # Money Flow Index (MFI) - simplified
+        if len(close_prices) >= 5:
+            typical_prices = [(high_prices[i] + low_prices[i] + close_prices[i])/3 for i in range(-5, 0)]
+            money_flow = [typical_prices[i] * (avg_volume/15) for i in range(len(typical_prices))]
+            
+            pos_flow = sum([money_flow[i] for i in range(1, len(money_flow)) 
+                           if typical_prices[i] > typical_prices[i-1]])
+            neg_flow = sum([money_flow[i] for i in range(1, len(money_flow)) 
+                           if typical_prices[i] < typical_prices[i-1]])
+            
+            money_ratio = pos_flow / max(neg_flow, 1e-8)
+            mfi = 100 - (100 / (1 + money_ratio))
+            eng.append(mfi / 100.0)  # Normalize to 0-1
         else:
-            bb_position = 0.5
-        eng.append(bb_position)
+            eng.append(0.5)
         
-        # 15. MACD Line - momentum indicator
-        # Simplified but effective calculation
-        if len(close_prices) >= 12:
-            ema_12 = np.mean(close_prices[-12:])  # Simplified EMA
-            ema_26 = np.mean(close_prices)  # Use all available as longer EMA
-            macd_line = ema_12 - ema_26
-            # Normalize by price
-            norm_macd = macd_line / max(avg_price, 1e-8)
+        # 5. Advanced Price Pattern Features
+        
+        # Average Directional Index (ADX) - simplified
+        if len(close_prices) >= 10:
+            tr_sum = 0
+            dx_sum = 0
+            
+            for i in range(-9, 0):
+                if i > -len(close_prices):
+                    # True Range
+                    tr1 = high_prices[i] - low_prices[i]
+                    tr2 = abs(high_prices[i] - close_prices[i-1]) if i > -len(close_prices)+1 else 0
+                    tr3 = abs(low_prices[i] - close_prices[i-1]) if i > -len(close_prices)+1 else 0
+                    tr = max(tr1, tr2, tr3)
+                    tr_sum += tr
+                    
+                    # Directional Movement
+                    if i > -len(close_prices)+1:
+                        up_move = high_prices[i] - high_prices[i-1]
+                        down_move = low_prices[i-1] - low_prices[i]
+                        
+                        if up_move > down_move and up_move > 0:
+                            dx = up_move
+                        elif down_move > up_move and down_move > 0:
+                            dx = down_move
+                        else:
+                            dx = 0
+                        
+                        dx_sum += dx
+            
+            # Simplified ADX calculation
+            adx = dx_sum / max(tr_sum, 1e-8)
+            eng.append(adx)
         else:
-            norm_macd = 0
-        eng.append(norm_macd)
+            eng.append(0.0)
         
-        # 16. Price Gap Ratio - large gaps can indicate short interest changes
-        # Improved calculation focusing on overnight gaps
-        gaps = []
-        for i in range(1, len(open_prices)):
-            gap = abs(open_prices[i] - close_prices[i-1]) / max(close_prices[i-1], 1e-8)
-            gaps.append(gap)
-        avg_gap = np.mean(gaps) if gaps else 0
-        eng.append(avg_gap)
+        # Chaikin Money Flow (CMF) - simplified
+        if len(close_prices) >= 5:
+            cmf_sum = 0
+            vol_sum = avg_volume / 3  # Simplified volume sum
+            
+            for i in range(-5, 0):
+                if i > -len(close_prices):
+                    # Money Flow Multiplier
+                    mfm = ((close_prices[i] - low_prices[i]) - (high_prices[i] - close_prices[i])) / max(high_prices[i] - low_prices[i], 1e-8)
+                    # Money Flow Volume
+                    mfv = mfm * (avg_volume / 15)  # Daily volume approximation
+                    cmf_sum += mfv
+            
+            cmf = cmf_sum / max(vol_sum, 1e-8)
+            eng.append(cmf)
+        else:
+            eng.append(0.0)
         
-        # 17. Close Location Value - where close price is relative to the day's range
-        # Indicates buying/selling pressure within the day
-        clv_values = []
-        for i in range(len(close_prices)):
-            if high_prices[i] == low_prices[i]:
-                clv_values.append(0)
-            else:
-                clv = ((close_prices[i] - low_prices[i]) - (high_prices[i] - close_prices[i])) / max(high_prices[i] - low_prices[i], 1e-8)
-                clv_values.append(clv)
-        avg_clv = np.mean(clv_values) if clv_values else 0
-        eng.append(avg_clv)
+        # 6. Specialized Short Interest Predictors
         
-        # 18. Price Momentum - rate of price change
-        # Captures recent price direction and strength
-        momentum = (close_prices[-1] / max(close_prices[0], 1e-8) - 1) if len(close_prices) > 1 else 0
-        eng.append(momentum)
+        # Short Interest to Price Ratio (normalized)
+        si_price_ratio = short_interest / max(close_prices[-1], 1e-8)
+        eng.append(si_price_ratio)
         
-        # 19. Volume-Adjusted Price Change - price moves weighted by volume
-        # Gives more weight to price moves with higher volume
-        vol_adj_price_change = momentum * avg_volume
-        eng.append(vol_adj_price_change)
+        # Short Interest Coverage Ratio (days to cover)
+        days_to_cover = short_interest / max(avg_volume, 1e-8)
+        eng.append(days_to_cover)
         
-        # 20. Chaikin Money Flow - volume-weighted accumulation/distribution
-        # Indicates buying/selling pressure with volume confirmation
-        cmf_values = []
-        for i in range(len(close_prices)):
-            if high_prices[i] == low_prices[i]:
-                mf_multiplier = 0
-            else:
-                mf_multiplier = ((close_prices[i] - low_prices[i]) - (high_prices[i] - close_prices[i])) / (high_prices[i] - low_prices[i])
-            money_flow_volume = mf_multiplier * avg_volume
-            cmf_values.append(money_flow_volume)
-        cmf = np.sum(cmf_values) / max(avg_volume * len(cmf_values), 1e-8) if cmf_values else 0
-        eng.append(cmf)
+        # Short Interest to Range Ratio
+        if len(close_prices) >= 5:
+            price_range = np.max(high_prices[-5:]) - np.min(low_prices[-5:])
+            si_range_ratio = short_interest / max(price_range * avg_volume, 1e-8)
+            eng.append(si_range_ratio)
+        else:
+            eng.append(0.0)
         
-        # 21. Short Interest to Free Float Ratio (approximated by volume)
-        # Measures how much of available float is being shorted
-        si_float_ratio = short_interest / max(avg_volume * 15, 1e-8)  # 15 days of volume as proxy for float
-        eng.append(si_float_ratio)
+        # 7. Market Efficiency Measures
         
-        # 22. Recent Price Reversal - captures potential short covering events
-        # Short covering often happens after price reversals
-        price_reversal = 0
-        if len(close_prices) > 5:
-            # Check if recent price movement is opposite to the previous trend
-            recent_trend = close_prices[-1] - close_prices[-3]
-            previous_trend = close_prices[-3] - close_prices[-5]
-            if previous_trend != 0:
-                price_reversal = -1 * (recent_trend * previous_trend) / max(abs(previous_trend), 1e-8)
-        eng.append(price_reversal)
+        # Hurst Exponent (simplified) - measures mean reversion vs trend following
+        if len(close_prices) >= 10:
+            # Log returns
+            log_returns = np.diff(np.log(close_prices[-10:]))
+            # Cumulative sum of log returns
+            cum_returns = np.cumsum(log_returns)
+            # Range of cumulative returns
+            r_range = np.max(cum_returns) - np.min(cum_returns)
+            # Standard deviation of log returns
+            std_returns = np.std(log_returns)
+            # Simplified Hurst calculation
+            hurst_proxy = r_range / max(std_returns, 1e-8) / np.sqrt(len(log_returns))
+            eng.append(min(hurst_proxy, 10.0))  # Cap to avoid extreme values
+        else:
+            eng.append(0.5)  # Default value
         
-        # 23. Short Interest to Volatility Ratio
-        # Relates short interest to market volatility
-        si_vol_ratio = short_interest / max(volatility * avg_price, 1e-8)
-        eng.append(si_vol_ratio)
-        
-        # Ensure we don't exceed MAX_NEW features
-        if len(eng) > MAX_NEW:
-            eng = eng[:MAX_NEW]
+        # Ensure we don't exceed MAX_NEW
+        eng = eng[:MAX_NEW]
         
         # Combine raw and engineered features
         row = np.array(raw_keep + eng, dtype=np.float32)
         
-        # Pad or truncate to MAX_TOTAL
+        # Ensure consistent size
         if row.size < MAX_TOTAL:
+            # Pad with zeros if needed
             row = np.pad(row, (0, MAX_TOTAL - row.size), 'constant')
         elif row.size > MAX_TOTAL:
+            # Truncate if needed
             row = row[:MAX_TOTAL]
-        
-        result.append(row)
+            
+        features[t, :] = row
     
-    # Stack all rows and handle NaN values
-    result_array = np.stack(result)
-    result_array = np.nan_to_num(result_array, nan=0.0, posinf=0.0, neginf=0.0)
+    # Handle NaN, inf values
+    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
     
-    return result_array
+    return features
 ```
 
-Performance of this code: MAPE = 7.98%
-Improvement over previous: +1.11%
-Statistical Analysis: 2/62 features were significant (p < 0.05), 2 were highly significant (p < 0.01)
+Performance of this code: MAPE = 9.52%
+Change from previous: -2.14%
+Statistical Analysis: 56/100 features were significant (p < 0.05), 37 were highly significant (p < 0.01)
 
 INSTRUCTIONS FOR NEW CODE:
 - Analyze the previous code and understand what features it tried to create
@@ -316,23 +308,27 @@ INSTRUCTIONS FOR NEW CODE:
 
 
 CURRENT TASK (Iteration 3):
-Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 7.98%.
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 7.37%.
 
 ### Strategy
-- Learn from previous iterations: refine or extend **high-importance** areas, but keep all raw channels this time.
-- Use **financial domain knowledge** for engineered features.
+- Learn from previous iterations: refine or extend **high-importance** areas, drop or transform **low-importance** ones.
+- Learn from previous iterations: keep the features with high feature importance, drop the features with low feature importance.
+- Use **financial domain knowledge**.
 - Maintain **LSTM-compatible** time series structure.
 - Keep the feature set **compact and non-redundant** due to the small sample size.
 
 ### HARD IMPLEMENTATION RULES (must follow to avoid index errors and ensure a stable shape)
 - Define constants at the top of the function:
   - `RAW_DIM = 62`
-  - `MAX_TOTAL = 85`
-  - `MAX_NEW = MAX_TOTAL - RAW_DIM`
+  - `MAX_TOTAL = 25`
+  - `MAX_NEW = MAX_TOTAL - 1`  # upper bound; actual new count is determined after raw selection, see below
 - **Do NOT preallocate** a fixed-width array and write with a moving `idx`.  
   Instead, for each timestep `t`:
-  1) Start with `raw_keep = list(data[t])` (this includes **all 62 raw features**).
-  2) Build `eng = []` for engineered features.
+  1) Build two Python lists:
+     - `raw_keep = []`  (subset of raw features you choose to keep at t, but your selection logic must be **the same for all timesteps** so the final width is constant)
+     - `eng = []`       (engineered features you append one by one)
+  2) Always include in `raw_keep`: short interest (index 0) and average volume (index 1).
+     Prefer **compact OHLC summaries** over copying all 60 OHLC channels (e.g., last-bar O,H,L,C; mean/median close over last 5; normalized range).
   3) After `raw_keep` is formed, compute `MAX_NEW = MAX_TOTAL - len(raw_keep)`.  
      **Never exceed this cap** when appending to `eng`.
   4) For every engineered candidate, **append to `eng`**.  
@@ -351,8 +347,8 @@ Your goal is to create an improved feature engineering function that will achiev
 ### Requirements
 1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features).
 2. The function must:
-   - **Preserve all 62 raw features**.
-   - Add **new, diverse features** while enforcing **(raw + new) ≤ 85**.
+   - **Preserve the raw features**.
+   - Add **new, diverse features** while enforcing **(kept raw + new) ≤ 25**.
    - Avoid near-duplicates: do not include multiple horizons of the same measure unless clearly distinct.
    - Use **eps clamping** for all divisions: `den = max(abs(den), 1e-8)`.
    - Apply `np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)` before return.

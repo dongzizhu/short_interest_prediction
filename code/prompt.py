@@ -3,7 +3,7 @@ Prompt templates for the iterative agent-based feature selection system.
 
 This module contains all the prompt templates used for LLM-based feature engineering.
 """
-
+MAX_FEATURES = 25
 
 def create_iterative_prompt_template(iteration_num: int, previous_results: list, 
                                    error_feedback: list = None) -> str:
@@ -126,7 +126,7 @@ Total: 1 + 1 + 60 = 62 features(dimensions) per timestamp.
 
 ## Dataset constraints
 - Only ~180 total samples available (very small).
-- To avoid overfitting: generate no more than 80 features. The 80 features should be a mix of raw and constructed features.
+- To avoid overfitting: generate no more than {MAX_FEATURES} features. The {MAX_FEATURES} features should be a mix of raw and constructed features.
 - Avoid replacing or discarding the useful raw channels; focus on **augmenting**.
 
 {history_text}
@@ -194,7 +194,7 @@ Total: 1 + 1 + 60 = 62 features per timestamp.
 
 ## Dataset constraints
 - Only ~180 total samples available (very small).
-- To reduce overfitting: **keep the raw channels** and add **new features** so that **(kept raw + new) ≤ 85 total columns**.
+- To reduce overfitting: **keep only the useful raw channels** and add **new features** so that **(kept raw + new) ≤ {MAX_FEATURES} total columns**.
 - You **may drop** raw channels with consistently low importance or redundancy after the second iteration.
 - Avoid redundant or near-duplicate engineered features. Prefer a small, diverse set.
 
@@ -219,7 +219,7 @@ Your goal is to create an improved feature engineering function that will achiev
 ### HARD IMPLEMENTATION RULES (must follow to avoid index errors and ensure a stable shape)
 - Define constants at the top of the function:
   - `RAW_DIM = 62`
-  - `MAX_TOTAL = 80`
+  - `MAX_TOTAL = {MAX_FEATURES}`
   - `MAX_NEW = MAX_TOTAL - 1`  # upper bound; actual new count is determined after raw selection, see below
 - **Do NOT preallocate** a fixed-width array and write with a moving `idx`.  
   Instead, for each timestep `t`:
@@ -247,7 +247,7 @@ Your goal is to create an improved feature engineering function that will achiev
 1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features).
 2. The function must:
    - **Preserve the raw features**.
-   - Add **new, diverse features** while enforcing **(kept raw + new) ≤ 80**.
+   - Add **new, diverse features** while enforcing **(kept raw + new) ≤ {MAX_FEATURES}**.
    - Avoid near-duplicates: do not include multiple horizons of the same measure unless clearly distinct.
    - Use **eps clamping** for all divisions: `den = max(abs(den), 1e-8)`.
    - Apply `np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)` before return.
@@ -282,7 +282,7 @@ Total: 1 + 1 + 60 = 62 features per timestamp.
 
 ## Dataset constraints
 - Only ~180 total samples available (very small).
-- To reduce overfitting: **keep ALL 62 raw features** and add **new features** so that **(raw + new) ≤ 85 total columns**.
+- To reduce overfitting: **keep ALL 62 raw features** and add **new features** so that **(raw + new) ≤ {MAX_FEATURES} total columns**.
 - Avoid redundant or near-duplicate engineered features. Prefer a small, diverse set.
 
 {history_text}
@@ -305,7 +305,7 @@ Your goal is to create an improved feature engineering function that will achiev
 ### HARD IMPLEMENTATION RULES (must follow to avoid index errors and ensure a stable shape)
 - Define constants at the top of the function:
   - `RAW_DIM = 62`
-  - `MAX_TOTAL = 85`
+  - `MAX_TOTAL = {MAX_FEATURES}`
   - `MAX_NEW = MAX_TOTAL - RAW_DIM`
 - **Do NOT preallocate** a fixed-width array and write with a moving `idx`.  
   Instead, for each timestep `t`:
@@ -330,7 +330,7 @@ Your goal is to create an improved feature engineering function that will achiev
 1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features).
 2. The function must:
    - **Preserve all 62 raw features**.
-   - Add **new, diverse features** while enforcing **(raw + new) ≤ 85**.
+   - Add **new, diverse features** while enforcing **(raw + new) ≤ {MAX_FEATURES}**.
    - Avoid near-duplicates: do not include multiple horizons of the same measure unless clearly distinct.
    - Use **eps clamping** for all divisions: `den = max(abs(den), 1e-8)`.
    - Apply `np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)` before return.

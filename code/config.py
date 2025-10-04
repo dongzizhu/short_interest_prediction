@@ -40,7 +40,8 @@ class DataConfig:
 class ModelConfig:
     """Configuration for model training and architecture."""
     
-    # Model architecture
+    # Model type and architecture
+    model_type: str = 'lstm'  # 'lstm' or 'svm'
     hidden_size: int = 32
     num_layers: int = 2
     dropout: float = 0.2
@@ -57,6 +58,13 @@ class ModelConfig:
     
     # Feature importance
     importance_method: str = 'permutation'  # 'permutation' or 'gradient'
+    
+    # SVM-specific parameters
+    svm_kernel: str = 'rbf'  # 'rbf', 'linear', 'poly', 'sigmoid'
+    svm_C: float = 1.0
+    svm_gamma: str = 'scale'  # 'scale', 'auto', or float
+    svm_epsilon: float = 0.1
+    svm_max_iter: int = 1000
 
 
 @dataclass
@@ -206,7 +214,7 @@ def get_production_config() -> Config:
     return Config(
         data_config=DataConfig(),
         model_config=ModelConfig(epochs=150, patience=20),  # More thorough training
-        llm_config=LLMConfig(max_iterations=15, min_improvement_threshold=0.1),
+        llm_config=LLMConfig(max_iterations=10, min_improvement_threshold=0.1),
         evaluation_config=EvaluationConfig(max_validation_tickers=None),
         system_config=SystemConfig(verbose=False, use_multiprocessing=True)
     )

@@ -98,6 +98,56 @@ def example_multi_ticker():
         print(f"❌ Error in multi-ticker processing: {e}")
 
 
+def example_svm_multi_ticker():
+    """Example: Process multiple tickers with SVM model."""
+    print("\n🔍 Example: Multi-Ticker Processing with SVM")
+    print("="*50)
+    
+    # Load development configuration for faster testing
+    config = get_production_config()
+    config.llm.api_key = os.getenv('ANTHROPIC_API_KEY', 'your-api-key-here')
+    
+    # Configure SVM model
+    config.model.model_type = 'svm'
+    config.model.svm_kernel = 'rbf'  # 'rbf', 'linear', 'poly', 'sigmoid'
+    config.model.svm_C = 1.0
+    config.model.svm_gamma = 'scale'
+    config.model.svm_epsilon = 0.1
+    config.model.svm_max_iter = 1000
+    
+    print(f"🤖 Using SVM model with kernel: {config.model.svm_kernel}")
+    print(f"   C: {config.model.svm_C}, Gamma: {config.model.svm_gamma}")
+    print(f"   Epsilon: {config.model.svm_epsilon}, Max iterations: {config.model.svm_max_iter}")
+    
+    if config.llm.api_key == 'your-api-key-here':
+        print("⚠️ Please set ANTHROPIC_API_KEY environment variable or update the code")
+        return
+    
+    # Initialize pipeline
+    pipeline = IterativeFeatureSelectionPipeline(config)
+    
+    # Define tickers to process (smaller set for faster testing)
+    # iterative_tickers = ['AAPL', 'TSLA']  # Single ticker for iterative feature engineering
+    # validation_tickers = ['TSLA', 'PFE']  # Tickers for validation
+    iterative_tickers = ['CYRX', 'ZEUS', 'DXLG', 'SMBK', 'FCEL']  
+    validation_tickers = ['BBW', 'UNFI', 'CMPR', 'VNDA', 'LWAY', 'MEI', 'SMBK', 'HLIT', 'INBK', 'FDUS', 'MCRI', 'GNE', 'CYRX', 'BBSI', 'INVA', 'OPK', 'OCUL', 'DXLG', 'DXPE', 'AMRK', 'AXGN', 'HCKT', 'ZEUS', 'ANIP', 'IMMR', 'CLFD', 'AEHR', 'NAT', 'EXTR', 'CHEF', 'PLYM', 'PEB', 'PLCE', 'XHR', 'FBK', 'GSBC', 'GOGO', 'SENEA', 'GNK', 'QNST', 'KRO', 'MITK', 'GSBD', 'URGN', 'AVNW', 'HTLD', 'XOMA', 'UFPT', 'FCEL', 'NVAX', 'GERN', 'CSV', 'FOR']  
+
+    try:
+        results = pipeline.run_multi_ticker_process(iterative_tickers, validation_tickers)
+        
+        print(f"\n✅ SVM Multi-ticker results:")
+        print(f"  Processed {len(results['ticker_results'])} tickers for iterative engineering")
+        
+        if results['universal_function']:
+            print(f"  Generated universal feature engineering function")
+        
+        if results['validation_results']:
+            print(f"  Validated on {len(results['validation_results'])} tickers")
+        
+    except Exception as e:
+        print(f"❌ Error in SVM multi-ticker processing: {e}")
+
+
 
 def main():
     """Run all examples."""
@@ -115,7 +165,8 @@ def main():
     else:
         print("✅ API key loaded successfully")
         # example_single_ticker()
-        example_multi_ticker()  # Commented out as it takes longer
+        # example_multi_ticker()  # Commented out as it takes longer
+        example_svm_multi_ticker()  # Run SVM example
     
     print("\n🎉 Examples completed!")
     print("\nTo run the full pipeline:")

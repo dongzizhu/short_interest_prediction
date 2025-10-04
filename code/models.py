@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVR
 from sklearn.metrics import mean_absolute_percentage_error, mean_squared_error, mean_absolute_error
 from typing import Dict, Tuple, List, Any, Optional
 import warnings
@@ -46,6 +47,130 @@ class EnhancedLSTMTimeSeries(nn.Module):
         return out
 
 
+class SVMModel:
+    """SVM model for time series prediction with feature importance calculation."""
+    
+    def __init__(self, kernel: str = 'rbf', C: float = 1.0, gamma: str = 'scale', 
+                 epsilon: float = 0.1, max_iter: int = 1000):
+        self.kernel = kernel
+        self.C = C
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.max_iter = max_iter
+        self.model = None
+        self.scaler = None
+        self.is_fitted = False
+    
+    def fit(self, X: np.ndarray, y: np.ndarray) -> 'SVMModel':
+        """Fit the SVM model to the data."""
+        # Reshape data for SVM (flatten time series dimension)
+        if X.ndim == 3:
+            # Flatten from (N, lookback_window, features) to (N, lookback_window * features)
+            X_reshaped = X.reshape(X.shape[0], -1)
+        else:
+            X_reshaped = X
+        
+        # Scale features
+        self.scaler = StandardScaler()
+        X_scaled = self.scaler.fit_transform(X_reshaped)
+        
+        # Fit SVM
+        self.model = SVR(
+            kernel=self.kernel,
+            C=self.C,
+            gamma=self.gamma,
+            epsilon=self.epsilon,
+            max_iter=self.max_iter
+        )
+        self.model.fit(X_scaled, y.ravel())
+        self.is_fitted = True
+        return self
+    
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Make predictions on new data."""
+        if not self.is_fitted:
+            raise ValueError("Model must be fitted before making predictions")
+        
+        # Reshape data for SVM (flatten time series dimension)
+        if X.ndim == 3:
+            # Flatten from (N, lookback_window, features) to (N, lookback_window * features)
+            X_reshaped = X.reshape(X.shape[0], -1)
+        else:
+            X_reshaped = X
+        
+        # Scale features
+        X_scaled = self.scaler.transform(X_reshaped)
+        
+        # Make predictions
+        predictions = self.model.predict(X_scaled)
+        return predictions.reshape(-1, 1)
+    
+    def get_feature_importance(self, X: np.ndarray, y: np.ndarray, 
+                              feature_names: List[str]) -> Tuple[Dict[str, Any], np.ndarray]:
+        """Calculate feature importance using permutation method."""
+        if not self.is_fitted:
+            raise ValueError("Model must be fitted before calculating feature importance")
+        
+        # Get baseline performance
+        baseline_pred = self.predict(X)
+        baseline_mse = np.mean((y.ravel() - baseline_pred.ravel()) ** 2)
+        
+        # Reshape data for permutation (same as in fit/predict)
+        if X.ndim == 3:
+            # Flatten from (N, lookback_window, features) to (N, lookback_window * features)
+            X_reshaped = X.reshape(X.shape[0], -1)
+            # Create expanded feature names for time series data
+            n_timesteps = X.shape[1]
+            n_features_per_timestep = X.shape[2]
+            expanded_feature_names = []
+            for t in range(n_timesteps):
+                for f in range(n_features_per_timestep):
+                    expanded_feature_names.append(f"{feature_names[f]}_t{t}")
+        else:
+            X_reshaped = X
+            expanded_feature_names = feature_names
+        
+        feature_importance = {}
+        importance_scores = []
+        
+        # Calculate importance for each feature
+        for i in range(X_reshaped.shape[1]):
+            # Create permuted data
+            X_permuted = X_reshaped.copy()
+            np.random.shuffle(X_permuted[:, i])
+            
+            # For SVM, we can work directly with the flattened data
+            # No need to reshape back since SVM expects flattened input
+            X_permuted_scaled = self.scaler.transform(X_permuted)
+            
+            # Calculate performance with permuted feature
+            perm_pred = self.model.predict(X_permuted_scaled).reshape(-1, 1)
+            perm_mse = np.mean((y.ravel() - perm_pred.ravel()) ** 2)
+            
+            # Importance = increase in MSE when feature is permuted
+            importance = perm_mse - baseline_mse
+            importance_scores.append(importance)
+            
+            # Determine significance based on importance magnitude
+            max_importance = max(importance_scores) if importance_scores else 1.0
+            relative_importance = importance / max_importance if max_importance > 0 else 0
+            
+            feature_importance[expanded_feature_names[i]] = {
+                'importance': importance,
+                'relative_importance': relative_importance,
+                'significant': relative_importance > 0.1,  # Top 10% of features
+                'highly_significant': relative_importance > 0.2,  # Top 5% of features
+                'rank': 0  # Will be updated after all features are processed
+            }
+        
+        # Rank features by importance
+        sorted_indices = np.argsort(importance_scores)[::-1]  # Descending order
+        for rank, idx in enumerate(sorted_indices):
+            feature_importance[expanded_feature_names[idx]]['rank'] = rank + 1
+        
+        return feature_importance, np.array(importance_scores)
+
+
 class ModelTrainer:
     """Model training and evaluation class."""
     
@@ -58,27 +183,40 @@ class ModelTrainer:
                                y_train: np.ndarray, y_test: np.ndarray, 
                                prev_log_test: np.ndarray, 
                                model_name: str = "Model", 
-                               epochs: Optional[int] = None) -> Dict[str, Any]:
+                               epochs: Optional[int] = None,
+                               model_type: str = "lstm") -> Dict[str, Any]:
         """
-        Train and evaluate an LSTM model, returning performance metrics and feature statistics.
+        Train and evaluate a model (LSTM or SVM), returning performance metrics and feature statistics.
         
         Parameters:
         X_train, X_test: Training and test features
         y_train, y_test: Training and test targets
         prev_log_test: Previous log values for test set (for level reconstruction)
         model_name: Name for the model
-        epochs: Number of training epochs (uses config default if None)
+        epochs: Number of training epochs (uses config default if None, only for LSTM)
+        model_type: Type of model to use ("lstm" or "svm")
         
         Returns:
         Dictionary containing performance metrics, model, and feature importance
         """
-        if epochs is None:
-            epochs = self.config.epochs
-            
         print(f"\n{'='*50}")
-        print(f"Training {model_name}")
+        print(f"Training {model_name} ({model_type.upper()})")
         print(f"{'='*50}")
         
+        if model_type == "lstm":
+            return self._train_lstm_model(X_train, X_test, y_train, y_test, prev_log_test, 
+                                        model_name, epochs)
+        elif model_type == "svm":
+            return self._train_svm_model(X_train, X_test, y_train, y_test, prev_log_test, 
+                                       model_name)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}. Use 'lstm' or 'svm'.")
+    
+    def _train_lstm_model(self, X_train: np.ndarray, X_test: np.ndarray, 
+                         y_train: np.ndarray, y_test: np.ndarray, 
+                         prev_log_test: np.ndarray, model_name: str, 
+                         epochs: int) -> Dict[str, Any]:
+        """Train and evaluate LSTM model."""
         # Scale inputs
         scaler = StandardScaler()
         X_train_reshaped = X_train.reshape(-1, X_train.shape[-1])
@@ -200,6 +338,76 @@ class ModelTrainer:
             'true_values': y_true_levels,
             'model': model,
             'scaler': scaler,
+            'feature_stats': feature_stats,
+            'importance_scores': importance_scores,
+            'significant_features': significant_features,
+            'highly_significant_features': highly_significant
+        }
+    
+    def _train_svm_model(self, X_train: np.ndarray, X_test: np.ndarray, 
+                        y_train: np.ndarray, y_test: np.ndarray, 
+                        prev_log_test: np.ndarray, model_name: str) -> Dict[str, Any]:
+        """Train and evaluate SVM model."""
+        # Initialize and fit SVM model
+        svm_model = SVMModel(
+            kernel=self.config.svm_kernel,
+            C=self.config.svm_C,
+            gamma=self.config.svm_gamma,
+            epsilon=self.config.svm_epsilon,
+            max_iter=self.config.svm_max_iter
+        )
+        
+        print("Training SVM model...")
+        svm_model.fit(X_train, y_train)
+        
+        # Make predictions
+        pred_logret = svm_model.predict(X_test).ravel()
+        
+        # Reconstruct levels
+        y_pred_levels = np.exp(prev_log_test + pred_logret)
+        y_true_levels = np.exp(prev_log_test + y_test.ravel())
+        
+        # Calculate metrics
+        mae = np.mean(np.abs(y_pred_levels - y_true_levels))
+        rmse = np.sqrt(np.mean((y_pred_levels - y_true_levels)**2))
+        mape = np.mean(np.abs((y_true_levels - y_pred_levels) / y_true_levels)) * 100
+        
+        print(f"\n{model_name} Performance:")
+        print(f"MAE: {mae:.4f}")
+        print(f"RMSE: {rmse:.4f}")
+        print(f"MAPE: {mape:.2f}%")
+        
+        # Calculate feature importance
+        print(f"\n📊 Calculating SVM feature importance...")
+        feature_names = [f"Feature_{i}" for i in range(X_train.shape[-1])]
+        
+        feature_stats, importance_scores = svm_model.get_feature_importance(
+            X_train, y_train, feature_names
+        )
+
+        # Print feature importance summary
+        significant_features = [name for name, stats in feature_stats.items() if stats['significant']]
+        highly_significant = [name for name, stats in feature_stats.items() if stats['highly_significant']]
+        
+        print(f"📈 SVM Feature Importance Analysis:")
+        print(f"   • Total features: {len(feature_stats)}")
+        print(f"   • Important features (top 10%): {len(significant_features)}")
+        print(f"   • Highly important features (top 5%): {len(highly_significant)}")
+        
+        # Show top 5 most important features with their importance scores
+        sorted_features = sorted(feature_stats.items(), key=lambda x: x[1]['importance'], reverse=True)
+        print(f"\n🔍 TOP 5 MOST IMPORTANT FEATURES:")
+        for i, (name, stats) in enumerate(sorted_features[:5]):
+            print(f"   {i+1}. {name}: importance={stats['importance']:.4f}, rank={stats['rank']}")
+        
+        return {
+            'mae': mae,
+            'rmse': rmse,
+            'mape': mape,
+            'predictions': y_pred_levels,
+            'true_values': y_true_levels,
+            'model': svm_model,
+            'scaler': svm_model.scaler,
             'feature_stats': feature_stats,
             'importance_scores': importance_scores,
             'significant_features': significant_features,
