@@ -460,16 +460,10 @@ class IterativeFeatureSelectionPipeline:
             print(f"{result['iteration']:<10} {result['model_name']:<25} {result['mape']:<15.2f} {improvement_str:<12}")
         
         # Find best result
-        best_result = min(iteration_results, key=lambda x: x['mape'])
+        best_result = min(iteration_results[1:], key=lambda x: x['mape'])
         print("-" * 50)
         print(f"🏆 Best: {best_result['model_name']} - MAPE: {best_result['mape']:.2f}%")
-        
-        # Final test performance if available
-        if 'final_test_mape' in best_result:
-            print(f"🎯 Final Test MAPE: {best_result['final_test_mape']:.2f}%")
-            if 'baseline_final_mape' in best_result:
-                print(f"📈 Final Improvement: {best_result.get('final_improvement', 0):.2f}%")
-        
+
         # Save results
         if self.config.evaluation.save_individual_results:
             self._save_ticker_results(ticker, best_result, iteration_codes, iteration_results)

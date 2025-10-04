@@ -13,70 +13,43 @@ Total: 1 + 1 + 60 = 62 features per timestamp.
 
 ## Dataset constraints
 - Only ~180 total samples available (very small).
-- To reduce overfitting: **keep only the useful raw channels** and add **new features** so that **(kept raw + new) ≤ 85 total columns**.
-- You **may drop** raw channels with consistently low importance or redundancy.
+- To reduce overfitting: **keep ALL 62 raw features** and add **new features** so that **(raw + new) ≤ 85 total columns**.
 - Avoid redundant or near-duplicate engineered features. Prefer a small, diverse set.
 
 
 
 PERFORMANCE HISTORY:
-Iteration 0: Baseline - MAPE: 8.33%
+Iteration 0: Baseline - MAPE: 9.77%
   Features: All 62 original features
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_0 (importance=0.0005), Feature_1 (importance=0.0003), Feature_54 (importance=0.0002), Feature_31 (importance=0.0001), Feature_53 (importance=0.0001)
+    • Top important features: Feature_0 (importance=0.0241), Feature_1 (importance=0.0058), Feature_52 (importance=0.0011), Feature_58 (importance=0.0011), Feature_12 (importance=0.0008)
 
 
 
 
 
-
-
-ERROR FEEDBACK FROM PREVIOUS ATTEMPTS:
-The following errors occurred in previous attempts. Please analyze these errors and ensure your code avoids these issues:
-
-Error 1:
-  • Error Type: ExecutionError
-  • Error Message: Function execution failed (attempt 1/3)
-  • Problematic Code: def construct_features(data):
-    RAW_DIM = 62
-    MAX_TOTAL = 80
-    
-    lookback_window = data.shape[0]
-    features = np.zeros((lookback_window, MAX_TOTAL), dtype=np.float32)
-    
-    for t in ran...
-
-IMPORTANT: Your new code must avoid these specific errors. Pay special attention to:
-- Array dimension mismatches and shape issues
-- Proper handling of edge cases and NaN values
-- Correct return value format (2D numpy array)
-- Robust error handling within the function
 
 
 
 
 CURRENT TASK (Iteration 1):
-Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 8.33%.
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 9.77%.
 
 ### Strategy
-- Learn from previous iterations: refine or extend **high-importance** areas, drop or transform **low-importance** ones.
-- Learn from previous iterations: keep the features with high feature importance, drop the features with low feature importance.
-- Use **financial domain knowledge**.
+- Learn from previous iterations: refine or extend **high-importance** areas, but keep all raw channels this time.
+- Use **financial domain knowledge** for engineered features.
 - Maintain **LSTM-compatible** time series structure.
 - Keep the feature set **compact and non-redundant** due to the small sample size.
 
 ### HARD IMPLEMENTATION RULES (must follow to avoid index errors and ensure a stable shape)
 - Define constants at the top of the function:
   - `RAW_DIM = 62`
-  - `MAX_TOTAL = 80`
-  - `MAX_NEW = MAX_TOTAL - 1`  # upper bound; actual new count is determined after raw selection, see below
+  - `MAX_TOTAL = 85`
+  - `MAX_NEW = MAX_TOTAL - RAW_DIM`
 - **Do NOT preallocate** a fixed-width array and write with a moving `idx`.  
   Instead, for each timestep `t`:
-  1) Build two Python lists:
-     - `raw_keep = []`  (subset of raw features you choose to keep at t, but your selection logic must be **the same for all timesteps** so the final width is constant)
-     - `eng = []`       (engineered features you append one by one)
-  2) Always include in `raw_keep`: short interest (index 0) and average volume (index 1).
-     Prefer **compact OHLC summaries** over copying all 60 OHLC channels (e.g., last-bar O,H,L,C; mean/median close over last 5; normalized range).
+  1) Start with `raw_keep = list(data[t])` (this includes **all 62 raw features**).
+  2) Build `eng = []` for engineered features.
   3) After `raw_keep` is formed, compute `MAX_NEW = MAX_TOTAL - len(raw_keep)`.  
      **Never exceed this cap** when appending to `eng`.
   4) For every engineered candidate, **append to `eng`**.  
@@ -95,8 +68,8 @@ Your goal is to create an improved feature engineering function that will achiev
 ### Requirements
 1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features).
 2. The function must:
-   - **Select and preserve only the useful raw features** (you may drop low-importance raw channels).
-   - Add **new, diverse features** while enforcing **(kept raw + new) ≤ 80**.
+   - **Preserve all 62 raw features**.
+   - Add **new, diverse features** while enforcing **(raw + new) ≤ 85**.
    - Avoid near-duplicates: do not include multiple horizons of the same measure unless clearly distinct.
    - Use **eps clamping** for all divisions: `den = max(abs(den), 1e-8)`.
    - Apply `np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)` before return.

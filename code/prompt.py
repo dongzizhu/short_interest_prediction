@@ -111,7 +111,7 @@ def create_iterative_prompt_template(iteration_num: int, previous_results: list,
             previous_code_text += "- Your new code should be an improvement over the previous attempt\n"
             previous_code_text += "- Think about what additional financial insights or technical indicators could be valuable\n"
     
-    prompt = f"""
+    prompt1 = f"""
 You are a financial data scientist specializing in **feature engineering for short-interest prediction** on equity time series. 
 
 ## Data schema
@@ -179,7 +179,7 @@ Requirements:
 Please provide ONLY the Python function code, no explanations outside the code comments.
 """
     
-    prompt = f"""
+    prompt2 = f"""
 You are a financial data scientist specializing in **feature engineering for short-interest prediction** on equity time series.
 
 ## Data schema
@@ -194,8 +194,8 @@ Total: 1 + 1 + 60 = 62 features per timestamp.
 
 ## Dataset constraints
 - Only ~180 total samples available (very small).
-- To reduce overfitting: **keep only the useful raw channels** and add **new features** so that **(kept raw + new) ≤ 85 total columns**.
-- You **may drop** raw channels with consistently low importance or redundancy.
+- To reduce overfitting: **keep the raw channels** and add **new features** so that **(kept raw + new) ≤ 85 total columns**.
+- You **may drop** raw channels with consistently low importance or redundancy after the second iteration.
 - Avoid redundant or near-duplicate engineered features. Prefer a small, diverse set.
 
 {history_text}
@@ -246,7 +246,7 @@ Your goal is to create an improved feature engineering function that will achiev
 ### Requirements
 1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features).
 2. The function must:
-   - **Select and preserve only the useful raw features** (you may drop low-importance raw channels).
+   - **Preserve the raw features**.
    - Add **new, diverse features** while enforcing **(kept raw + new) ≤ 80**.
    - Avoid near-duplicates: do not include multiple horizons of the same measure unless clearly distinct.
    - Use **eps clamping** for all divisions: `den = max(abs(den), 1e-8)`.
@@ -266,7 +266,91 @@ Your goal is to create an improved feature engineering function that will achiev
 ### Deliverable
 Return **ONLY** the Python function code (no text outside the code).
 """
-    return prompt
+
+    prompt3 = f"""
+You are a financial data scientist specializing in **feature engineering for short-interest prediction** on equity time series.
+
+## Data schema
+- Input to your function: a **numpy array** `data` with shape **(lookback_window, 62)** for a *single* sample.
+- Feature layout at each timestep `t`:
+  - `data[t, 0]` → **short interest** at time *T* (reported every 15 days)
+  - `data[t, 1]` → **average daily volume (past 15 days)**
+  - `data[t, 2:62]` → **OHLC** over the past 15 days, flattened as **15 days × 4 columns** in order **[O, H, L, C]**  
+    Use: `ohlc = data[t, 2:].reshape(15, 4)` → `open, high, low, close = ohlc[:,0], ohlc[:,1], ohlc[:,2], ohlc[:,3]`.
+
+Total: 1 + 1 + 60 = 62 features per timestamp.
+
+## Dataset constraints
+- Only ~180 total samples available (very small).
+- To reduce overfitting: **keep ALL 62 raw features** and add **new features** so that **(raw + new) ≤ 85 total columns**.
+- Avoid redundant or near-duplicate engineered features. Prefer a small, diverse set.
+
+{history_text}
+
+{statistical_insights}
+
+{error_feedback_text}
+
+{previous_code_text}
+
+CURRENT TASK (Iteration {iteration_num}):
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of {best_mape:.2f}%.
+
+### Strategy
+- Learn from previous iterations: refine or extend **high-importance** areas, but keep all raw channels this time.
+- Use **financial domain knowledge** for engineered features.
+- Maintain **LSTM-compatible** time series structure.
+- Keep the feature set **compact and non-redundant** due to the small sample size.
+
+### HARD IMPLEMENTATION RULES (must follow to avoid index errors and ensure a stable shape)
+- Define constants at the top of the function:
+  - `RAW_DIM = 62`
+  - `MAX_TOTAL = 85`
+  - `MAX_NEW = MAX_TOTAL - RAW_DIM`
+- **Do NOT preallocate** a fixed-width array and write with a moving `idx`.  
+  Instead, for each timestep `t`:
+  1) Start with `raw_keep = list(data[t])` (this includes **all 62 raw features**).
+  2) Build `eng = []` for engineered features.
+  3) After `raw_keep` is formed, compute `MAX_NEW = MAX_TOTAL - len(raw_keep)`.  
+     **Never exceed this cap** when appending to `eng`.
+  4) For every engineered candidate, **append to `eng`**.  
+     If you hit the cap (`len(eng) == MAX_NEW`), **stop adding** more features (no exceptions).
+  5) **Never reference** engineered columns by hard-coded indices (e.g., `features[t, 62+7]` is forbidden).  
+     If you need a previously computed engineered value, **reuse the local variable** (e.g., `rsi_val`), not a column number.
+  6) Ensure the column count is **identical for all timesteps** (no branch-induced width changes).  
+     If a feature cannot be computed (e.g., insufficient points), **append a 0 placeholder** for that slot so widths remain equal.
+  7) Construct the row with concatenation:
+     - `row = np.array(raw_keep + eng, dtype=np.float32)`
+     - If `row.size < MAX_TOTAL`, **pad with zeros** to length `MAX_TOTAL`.
+     - If `row.size > MAX_TOTAL`, **truncate the tail** to `MAX_TOTAL`.
+- After looping over timesteps, stack rows into a 2D array with shape `(lookback_window, MAX_TOTAL)` and return it.
+- The function must **never attempt to write past** column index `MAX_TOTAL - 1`.
+
+### Requirements
+1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features).
+2. The function must:
+   - **Preserve all 62 raw features**.
+   - Add **new, diverse features** while enforcing **(raw + new) ≤ 85**.
+   - Avoid near-duplicates: do not include multiple horizons of the same measure unless clearly distinct.
+   - Use **eps clamping** for all divisions: `den = max(abs(den), 1e-8)`.
+   - Apply `np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)` before return.
+3. Process each timestep independently but maintain the temporal axis (lookback_window).
+4. Focus on the **most predictive and stable** features using DL-based importance + domain knowledge.
+5. Include **inline comments** explaining how you improved on previous attempts and why each new feature matters.
+6. Code must be **production-ready**: numerically safe, vectorized where reasonable, no randomness or printing.
+7. DO NOT include imports — these are already available: `np, pd, math, statistics, stats, StandardScaler, MinMaxScaler, mean_squared_error, mean_absolute_error, datetime, time`.
+8. Return a **2D numpy array** `(lookback_window, constructed_features)` with dtype `float32`.
+
+### Strong redundancy rules
+- **One per family** unless clearly distinct (e.g., choose either SMA ratio or z-score, not both).
+- Drop overlapping or affine equivalents (e.g., SMA ratio vs z-score with same window).
+- Avoid fragile ops (`np.corrcoef`, polynomial fits, EMA on <3 points); prefer simple, stable ratios.
+
+### Deliverable
+Return **ONLY** the Python function code (no text outside the code).
+"""
+
+    return prompt2
 
 def create_universal_prompt_template(ticker_results: dict) -> str:
     """Create a prompt to generate universal feature engineering code from multiple ticker results."""
@@ -308,9 +392,8 @@ Your goal is to analyze all the ticker-specific feature engineering codes above 
 
 1. **Combines the best practices** from all ticker-specific codes
 2. **Identifies common patterns** that work well across different stocks
-3. **Incorporates the most effective features** from each ticker's best code
-4. **Leave the redunant features or less effective features** from each ticker's best code
-5. **Maintains the same input/output format**: takes (lookback_window, 62) and returns (lookback_window, constructed_features)
+3. **Leave the redunant features or less effective features** from each ticker's best code
+4. **Maintains the same input/output format**: takes (lookback_window, 62) and returns (lookback_window, constructed_features)
 
 ANALYSIS INSTRUCTIONS:
 - Review each ticker's best code and identify the most effective feature engineering techniques

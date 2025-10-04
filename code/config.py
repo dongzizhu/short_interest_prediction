@@ -9,6 +9,7 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+import pandas as pd
 
 
 @dataclass
@@ -148,9 +149,7 @@ class Config:
         raise ValueError("API key not found. Set ANTHROPIC_API_KEY environment variable or set llm.api_key in config.")
     
     def get_available_tickers(self, max_tickers: Optional[int] = None) -> List[str]:
-        """Get list of available tickers from the parquet file."""
-        import pandas as pd
-        
+        """Get list of available tickers from the parquet file."""        
         try:
             df = pd.read_parquet(self.data.parquet_path)
             all_tickers = list(set([x[0] for x in df.columns]))
