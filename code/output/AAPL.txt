@@ -1,0 +1,1408 @@
+PROCESSING TICKER 1/2: AAPL
+================================================================================
+🚀 Starting Iterative Agent-Based Feature Selection Process for AAPL
+======================================================================
+📊 Loading data from parquet file...
+📊 Loading data for AAPL from parquet file...
+Loading parquet file: ../data/price_data_multiindex_20250904_113138.parquet
+Parquet file loaded. Shape: (6499, 46544)
+Date range: 1999-11-01 00:00:00 to 2025-09-03 00:00:00
+SI dates range: 2017-12-29 00:00:00 to 2025-07-15 00:00:00
+Number of SI observations: 182
+Extracting OHLC data for AAPL...
+Retrieved price data for 1918 trading days
+Price data date range: 2017-11-29 00:00:00 to 2025-07-18 00:00:00
+Creating price features with 15 days lookback...
+Price features shape: (182, 60)
+Combined features shape: (182, 62)
+Training data shape: (106, 4, 62)
+Validation data shape: (36, 4, 62)
+Test data shape: (36, 4, 62)
+✅ Data integrity validation passed
+✅ Data loaded successfully!
+Training data shape: (106, 4, 62)
+Validation data shape: (36, 4, 62)
+Test data shape: (36, 4, 62)
+Features per timestep: 62
+Lookback window: 4
+
+🎯 Step 1: Running baseline model on validation set...
+
+==================================================
+Training Baseline (All 62 Features)
+==================================================
+Epoch 1/100, Train Loss: 0.055644
+Epoch 11/100, Train Loss: 0.019892
+Epoch 21/100, Train Loss: 0.017837
+Epoch 31/100, Train Loss: 0.019926
+Epoch 41/100, Train Loss: 0.017196
+Early stopping at epoch 42
+
+Baseline (All 62 Features) Performance:
+MAE: 7383841.5372
+RMSE: 8521417.0245
+MAPE: 6.76%
+
+📊 Calculating DL-based feature importance...
+📊 Calculating permutation-based feature importance...
+📈 DL-Based Feature Importance Analysis:
+   • Total features: 62
+   • Important features (top 10%): 13
+   • Highly important features (top 5%): 10
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_0: importance=0.0002, rank=1
+   2. Feature_35: importance=0.0001, rank=2
+   3. Feature_5: importance=0.0001, rank=3
+   4. Feature_17: importance=0.0001, rank=4
+   5. Feature_1: importance=0.0001, rank=5
+
+📊 Baseline Performance: MAPE = 6.76%
+
+🔄 Starting iterative improvement process...
+Max iterations: 15
+Min improvement threshold: 0.1%
+Patience: 5 iterations without improvement
+
+======================================================================
+ITERATION 1
+======================================================================
+🤖 Calling Claude for iteration 1...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction from financial time series data.
+
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing:
+            - Feature_0: Short interest at time T
+            - Feature_1: Average daily volume quantity of past 15 days
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge cases
+    if data is None or data.shape[0] == 0 or data.shape[1] != 62:
+        raise ValueError(f"Invalid input data shape: {data.shape if data is not None else None}")
+
+    lookback_window = data.shape[0]
+
+    # Initialize output array
+    # We'll create a focused set of features based on importance analysis
+    output = np.zeros((lookback_window, 15))
+
+    for t in range(lookback_window):
+        # Extract data for current timestamp
+        current_data = data[t]
+
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data)
+
+        # Feature 0: Short interest (Feature_0) - highest importance from DL analysis
+        output[t, 0] = current_data[0]
+
+        # Feature 1: Average daily volume (Feature_1) - high importance from DL analysis
+        output[t, 1] = current_data[1]
+
+        # Feature 2: Short interest to volume ratio - relationship between short interest and trading volume
+        # This is a key metric for short squeeze potential
+        output[t, 2] = current_data[0] / (current_data[1] + 1e-8)
+
+        # Extract OHLC data - reshape to get 15 days of OHLC data
+        ohlc_data = current_data[2:].reshape(15, 4)  # 15 days, 4 values (OHLC)
+
+        # Feature 3: Price volatility (using high-low range) - volatility is often correlated with short interest
+        price_ranges = ohlc_data[:, 1] - ohlc_data[:, 2]  # High - Low for each day
+        output[t, 3] = np.mean(price_ranges)
+
+        # Feature 4: Recent price trend (using close prices) - price trends can influence short interest
+        close_prices = ohlc_data[:, 3]  # Close prices
+        if len(close_prices) > 1:
+            output[t, 4] = (close_prices[-1] / close_prices[0]) - 1  # Overall price change
+
+        # Feature 5: Short-term momentum (5-day)
+        if len(close_prices) >= 5:
+            output[t, 5] = (close_prices[-1] / close_prices[-5]) - 1
+
+        # Feature 6: Medium-term momentum (10-day)
+        if len(close_prices) >= 10:
+            output[t, 6] = (close_prices[-1] / close_prices[-10]) - 1
+
+        # Feature 7: Price gap ratio - sudden price changes can trigger short covering
+        daily_returns = np.diff(close_prices) / close_prices[:-1]
+        output[t, 7] = np.max(np.abs(daily_returns)) if len(daily_returns) > 0 else 0
+
+        # Feature 8: Trading range relative to price - normalized volatility
+        avg_price = np.mean(close_prices)
+        output[t, 8] = np.mean(price_ranges) / (avg_price + 1e-8)
+
+        # Feature 9: Volume-weighted price change - high volume price moves are significant
+        volume = current_data[1]
+        output[t, 9] = output[t, 4] * volume
+
+        # Feature 10: Exponentially weighted short interest change
+        # More recent changes are more important
+        if t > 0 and t < lookback_window:
+            prev_si = data[t-1, 0]
+            current_si = current_data[0]
+            si_change = (current_si / (prev_si + 1e-8)) - 1
+            output[t, 10] = si_change
+
+        # Feature 11: Price reversal indicator - potential short covering signal
+        if len(close_prices) >= 3:
+            # Detect price reversals (down then up, or up then down)
+            prev_return = (close_prices[-2] / close_prices[-3]) - 1
+            current_return = (close_prices[-1] / close_prices[-2]) - 1
+            output[t, 11] = 1 if prev_return * current_return < 0 else 0
+
+        # Feature 12: Relative strength of recent price moves
+        if len(close_prices) >= 5:
+            up_moves = np.sum(np.maximum(np.diff(close_prices[-5:]), 0))
+            down_moves = np.sum(np.abs(np.minimum(np.diff(close_prices[-5:]), 0)))
+            output[t, 12] = up_moves / (down_moves + 1e-8)
+
+        # Feature 13: Short interest acceleration (change in the rate of change)
+        if t >= 2:
+            si_t = data[t, 0]
+            si_t_1 = data[t-1, 0]
+            si_t_2 = data[t-2, 0]
+
+            change_1 = (si_t / (si_t_1 + 1e-8)) - 1
+            change_2 = (si_t_1 / (si_t_2 + 1e-8)) - 1
+            output[t, 13] = change_1 - change_2
+
+        # Feature 14: Normalized Feature_35 (high importance from DL analysis)
+        # Assuming Feature_35 is one of the OHLC values
+        feature_35_idx = 35 - 2  # Adjust for 0-indexing and offset
+        day_idx = feature_35_idx // 4
+        ohlc_idx = feature_35_idx % 4
+
+        if day_idx < 15:
+            feature_35_value = ohlc_data[day_idx, ohlc_idx]
+            # Normalize by average price
+            output[t, 14] = feature_35_value / (avg_price + 1e-8)
+
+    # Final handling of any remaining NaN or inf values
+    output = np.nan_to_num(output)
+
+    return output
+```
+--------------------------------------------------
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 15)
+✅ Function executed successfully and passed validation!
+
+🔧 Applying feature selection using claude function...
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Training data shape: (106, 4, 62) -> (106, 4, 15)
+Validation data shape: (36, 4, 62) -> (36, 4, 15)
+
+==================================================
+Training Iteration 1 (claude)
+==================================================
+Epoch 1/100, Train Loss: 0.025022
+Epoch 11/100, Train Loss: 0.016326
+Epoch 21/100, Train Loss: 0.014859
+Epoch 31/100, Train Loss: 0.008586
+Epoch 41/100, Train Loss: 0.005744
+Epoch 51/100, Train Loss: 0.005131
+Epoch 61/100, Train Loss: 0.004516
+Epoch 71/100, Train Loss: 0.004047
+Epoch 81/100, Train Loss: 0.003800
+Epoch 91/100, Train Loss: 0.003380
+Early stopping at epoch 91
+
+Iteration 1 (claude) Performance:
+MAE: 11585804.1646
+RMSE: 13929098.7555
+MAPE: 10.22%
+
+📊 Calculating DL-based feature importance...
+📊 Calculating permutation-based feature importance...
+📈 DL-Based Feature Importance Analysis:
+   • Total features: 15
+   • Important features (top 10%): 7
+   • Highly important features (top 5%): 3
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_2: importance=0.0268, rank=1
+   2. Feature_3: importance=0.0099, rank=2
+   3. Feature_0: importance=0.0083, rank=3
+   4. Feature_13: importance=0.0048, rank=4
+   5. Feature_10: importance=0.0042, rank=5
+💾 Saved code for iteration 1 to iteration_codes dictionary
+📊 No significant improvement. Change: -3.46%
+
+📈 Current best MAPE: 6.76%
+🔄 Iterations without improvement: 1/5
+
+======================================================================
+ITERATION 2
+======================================================================
+🤖 Calling Claude for iteration 2...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction from financial time series data.
+
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing:
+            - Feature_0: Short interest at time T
+            - Feature_1: Average daily volume quantity of past 15 days
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge cases
+    if data is None or data.shape[0] == 0 or data.shape[1] != 62:
+        raise ValueError(f"Invalid input data shape: {data.shape if data is not None else None}")
+
+    lookback_window = data.shape[0]
+
+    # Initialize output array - focusing on fewer, more significant features
+    # Previous iteration had too many features (15) which likely caused overfitting
+    # Focusing on 10 features based on DL importance and financial domain knowledge
+    output = np.zeros((lookback_window, 10))
+
+    for t in range(lookback_window):
+        # Extract data for current timestamp
+        current_data = data[t]
+
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data)
+
+        # Feature 0: Short interest (Feature_0) - highest importance from DL analysis
+        # This was the most important feature in the baseline model
+        output[t, 0] = current_data[0]
+
+        # Extract OHLC data - reshape to get 15 days of OHLC data
+        ohlc_data = current_data[2:].reshape(15, 4)  # 15 days, 4 values (OHLC)
+
+        # Feature 1: Feature_35 from original data (high importance in baseline)
+        # Feature_35 corresponds to a specific OHLC value that was important
+        day_idx = (35 - 2) // 4
+        ohlc_idx = (35 - 2) % 4
+        output[t, 1] = ohlc_data[day_idx, ohlc_idx]
+
+        # Feature 2: Feature_5 from original data (high importance in baseline)
+        day_idx = (5 - 2) // 4
+        ohlc_idx = (5 - 2) % 4
+        output[t, 2] = ohlc_data[day_idx, ohlc_idx]
+
+        # Feature 3: Feature_17 from original data (high importance in baseline)
+        day_idx = (17 - 2) // 4
+        ohlc_idx = (17 - 2) % 4
+        output[t, 3] = ohlc_data[day_idx, ohlc_idx]
+
+        # Feature 4: Average daily volume (Feature_1) - high importance from DL analysis
+        # This was among the top 5 important features in the baseline model
+        output[t, 4] = current_data[1]
+
+        # Feature 5: Short interest to volume ratio - key metric for short squeeze potential
+        # This ratio is widely used in financial analysis for short interest
+        output[t, 5] = current_data[0] / (current_data[1] + 1e-8)
+
+        # Feature 6: Days to cover - how many days it would take to cover all short positions
+        # This is a standard metric in short interest analysis
+        close_prices = ohlc_data[:, 3]  # Close prices
+        avg_price = np.mean(close_prices)
+        # Estimate total short value and daily dollar volume
+        short_value = current_data[0] * avg_price
+        daily_dollar_volume = current_data[1] * avg_price
+        output[t, 6] = short_value / (daily_dollar_volume + 1e-8)
+
+        # Feature 7: Short-term price trend (5-day)
+        # Price trends can influence short covering decisions
+        if len(close_prices) >= 5:
+            output[t, 7] = (close_prices[-1] / close_prices[-5]) - 1
+
+        # Feature 8: Exponentially weighted price volatility
+        # Volatility is often correlated with short interest changes
+        price_ranges = ohlc_data[:, 1] - ohlc_data[:, 2]  # High - Low for each day
+        if len(price_ranges) >= 5:
+            # More weight to recent volatility
+            weights = np.exp(np.linspace(0, 1, 5))
+            weights = weights / np.sum(weights)
+            output[t, 8] = np.sum(weights * price_ranges[-5:]) / avg_price
+
+        # Feature 9: Short interest momentum
+        # Previous iteration showed this was significant
+        if t > 0:
+            prev_si = data[t-1, 0]
+            current_si = current_data[0]
+            output[t, 9] = (current_si / (prev_si + 1e-8)) - 1
+
+    # Final handling of any remaining NaN or inf values
+    output = np.nan_to_num(output)
+
+    return output
+```
+--------------------------------------------------
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 10)
+✅ Function executed successfully and passed validation!
+
+🔧 Applying feature selection using claude function...
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Training data shape: (106, 4, 62) -> (106, 4, 10)
+Validation data shape: (36, 4, 62) -> (36, 4, 10)
+
+==================================================
+Training Iteration 2 (claude)
+==================================================
+Epoch 1/100, Train Loss: 0.018583
+Epoch 11/100, Train Loss: 0.016129
+Epoch 21/100, Train Loss: 0.014599
+Epoch 31/100, Train Loss: 0.011405
+Epoch 41/100, Train Loss: 0.008148
+Epoch 51/100, Train Loss: 0.009382
+Epoch 61/100, Train Loss: 0.006517
+Epoch 71/100, Train Loss: 0.005642
+Epoch 81/100, Train Loss: 0.006379
+Epoch 91/100, Train Loss: 0.006079
+
+Iteration 2 (claude) Performance:
+MAE: 12449943.8016
+RMSE: 14387670.9750
+MAPE: 10.99%
+
+📊 Calculating DL-based feature importance...
+📊 Calculating permutation-based feature importance...
+📈 DL-Based Feature Importance Analysis:
+   • Total features: 10
+   • Important features (top 10%): 9
+   • Highly important features (top 5%): 9
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_7: importance=0.0155, rank=1
+   2. Feature_6: importance=0.0041, rank=2
+   3. Feature_8: importance=0.0036, rank=3
+   4. Feature_9: importance=0.0034, rank=4
+   5. Feature_5: importance=0.0025, rank=5
+💾 Saved code for iteration 2 to iteration_codes dictionary
+📊 No significant improvement. Change: -4.23%
+
+📈 Current best MAPE: 6.76%
+🔄 Iterations without improvement: 2/5
+
+======================================================================
+ITERATION 3
+======================================================================
+🤖 Calling Claude for iteration 3...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction from financial time series data.
+
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing:
+            - Feature_0: Short interest at time T
+            - Feature_1: Average daily volume quantity of past 15 days
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge cases
+    if data is None or data.shape[0] == 0 or data.shape[1] != 62:
+        raise ValueError(f"Invalid input data shape: {data.shape if data is not None else None}")
+
+    lookback_window = data.shape[0]
+
+    # Initialize output array
+    # Based on performance history, the baseline model with all original features performed best
+    # We'll focus on the most important features from the baseline model and add carefully selected derivatives
+    output = np.zeros((lookback_window, 8))
+
+    for t in range(lookback_window):
+        # Extract data for current timestamp
+        current_data = data[t]
+
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data)
+
+        # Extract OHLC data - reshape to get 15 days of OHLC data
+        ohlc_data = current_data[2:].reshape(15, 4)  # 15 days, 4 values (OHLC)
+
+        # Feature 0: Short interest (Feature_0) - highest importance from baseline model
+        # This was consistently the most important feature across iterations
+        output[t, 0] = current_data[0]
+
+        # Feature 1: Feature_35 from original data (2nd highest importance in baseline)
+        # Feature_35 corresponds to a specific OHLC value that was important
+        day_idx = (35 - 2) // 4
+        ohlc_idx = (35 - 2) % 4
+        output[t, 1] = current_data[35]
+
+        # Feature 2: Feature_5 from original data (3rd highest importance in baseline)
+        output[t, 2] = current_data[5]
+
+        # Feature 3: Feature_17 from original data (4th highest importance in baseline)
+        output[t, 3] = current_data[17]
+
+        # Feature 4: Average daily volume (Feature_1) - 5th highest importance from baseline
+        output[t, 4] = current_data[1]
+
+        # Feature 5: Short interest to volume ratio - normalized by market cap proxy
+        # This ratio is widely used in financial analysis for short interest
+        # We normalize by average price to account for different stock price levels
+        avg_price = np.mean(ohlc_data[:, 3])  # Average close price
+        output[t, 5] = (current_data[0] / (current_data[1] + 1e-8)) / (avg_price + 1e-8)
+
+        # Feature 6: Recent price trend relative to short interest
+        # This captures the relationship between price movement and short interest
+        # Short sellers often cover (reducing short interest) when prices rise
+        close_prices = ohlc_data[:, 3]  # Close prices
+        if len(close_prices) >= 5:
+            recent_return = (close_prices[-1] / close_prices[-5]) - 1
+            # Ratio of short interest to recent return - higher values indicate
+            # short interest hasn't decreased despite price increases
+            output[t, 6] = current_data[0] / (abs(recent_return) + 1e-8) * np.sign(recent_return + 1e-8)
+
+        # Feature 7: Volatility-adjusted short interest
+        # Short interest is more impactful in volatile stocks
+        # Calculate price volatility (standard deviation of returns)
+        if len(close_prices) >= 5:
+            returns = np.diff(close_prices[-6:]) / close_prices[-6:-1]
+            volatility = np.std(returns) + 1e-8
+            output[t, 7] = current_data[0] * volatility
+
+    # Final handling of any remaining NaN or inf values
+    output = np.nan_to_num(output)
+
+    # Analysis of approach compared to previous iterations:
+    # 1. We're returning to basics by focusing on the original features that showed
+    #    highest importance in the baseline model (which had the best performance)
+    # 2. Previous iterations added too many engineered features (10-15) which likely
+    #    caused overfitting given the limited sample size
+    # 3. We're using fewer features (8) with 5 being the most important original features
+    #    and only 3 carefully selected engineered features
+    # 4. The engineered features focus on relationships between short interest and
+    #    market dynamics (volume, price trends, volatility) rather than technical indicators
+    # 5. We're avoiding complex transformations that might introduce noise
+
+    return output
+```
+--------------------------------------------------
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 8)
+✅ Function executed successfully and passed validation!
+
+🔧 Applying feature selection using claude function...
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Training data shape: (106, 4, 62) -> (106, 4, 8)
+Validation data shape: (36, 4, 62) -> (36, 4, 8)
+
+==================================================
+Training Iteration 3 (claude)
+==================================================
+Epoch 1/100, Train Loss: 0.018600
+Epoch 11/100, Train Loss: 0.017659
+Epoch 21/100, Train Loss: 0.017367
+Epoch 31/100, Train Loss: 0.015531
+Epoch 41/100, Train Loss: 0.015614
+Epoch 51/100, Train Loss: 0.012635
+Epoch 61/100, Train Loss: 0.010603
+Epoch 71/100, Train Loss: 0.010907
+Epoch 81/100, Train Loss: 0.009978
+Epoch 91/100, Train Loss: 0.008019
+
+Iteration 3 (claude) Performance:
+MAE: 12318270.3701
+RMSE: 14241917.7586
+MAPE: 10.95%
+
+📊 Calculating DL-based feature importance...
+📊 Calculating permutation-based feature importance...
+📈 DL-Based Feature Importance Analysis:
+   • Total features: 8
+   • Important features (top 10%): 7
+   • Highly important features (top 5%): 7
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_2: importance=0.0096, rank=1
+   2. Feature_7: importance=0.0088, rank=2
+   3. Feature_5: importance=0.0082, rank=3
+   4. Feature_1: importance=0.0066, rank=4
+   5. Feature_3: importance=0.0062, rank=5
+💾 Saved code for iteration 3 to iteration_codes dictionary
+📊 No significant improvement. Change: -4.20%
+
+📈 Current best MAPE: 6.76%
+🔄 Iterations without improvement: 3/5
+
+======================================================================
+ITERATION 4
+======================================================================
+🤖 Calling Claude for iteration 4...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction from financial time series data.
+
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing:
+            - Feature_0: Short interest at time T
+            - Feature_1: Average daily volume quantity of past 15 days
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge cases
+    if data is None or data.shape[0] == 0 or data.shape[1] != 62:
+        raise ValueError(f"Invalid input data shape: {data.shape if data is not None else None}")
+
+    lookback_window = data.shape[0]
+
+    # Initialize output array - using fewer features to avoid overfitting
+    # Based on performance history, the baseline model with all original features performed best
+    # We'll focus on the most important original features and add minimal engineered features
+    output = np.zeros((lookback_window, 12))
+
+    for t in range(lookback_window):
+        # Extract data for current timestamp
+        current_data = data[t]
+
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data)
+
+        # Extract OHLC data - reshape to get 15 days of OHLC data
+        ohlc_data = current_data[2:].reshape(15, 4)  # 15 days, 4 values (OHLC)
+
+        # Extract key components
+        short_interest = current_data[0]  # Feature_0
+        avg_volume = current_data[1]      # Feature_1
+
+        # Extract close prices for easier access
+        close_prices = ohlc_data[:, 3]
+
+        # Feature 0: Short interest (Feature_0) - consistently the most important feature
+        output[t, 0] = short_interest
+
+        # Feature 1: Feature_35 - second most important feature from baseline
+        output[t, 1] = current_data[35]
+
+        # Feature 2: Feature_5 - third most important feature from baseline
+        output[t, 2] = current_data[5]
+
+        # Feature 3: Feature_17 - fourth most important feature from baseline
+        output[t, 3] = current_data[17]
+
+        # Feature 4: Average daily volume (Feature_1) - fifth most important feature
+        output[t, 4] = avg_volume
+
+        # Feature 5: Days to cover ratio (standard metric in short interest analysis)
+        # This represents how many days it would take to cover all short positions
+        # Higher values indicate higher short squeeze potential
+        output[t, 5] = short_interest / (avg_volume + 1e-8)
+
+        # Feature 6: Short interest momentum (change in short interest)
+        # This captures the trend in short interest which is predictive of future movements
+        if t > 0:
+            prev_short_interest = data[t-1, 0]
+            output[t, 6] = short_interest - prev_short_interest
+        else:
+            output[t, 6] = 0
+
+        # Feature 7: Relative short interest (compared to recent average)
+        # This normalizes short interest against its recent history
+        if t >= 2:
+            recent_si = np.mean([data[t-i, 0] for i in range(1, min(3, t+1))])
+            output[t, 7] = short_interest / (recent_si + 1e-8) - 1
+        else:
+            output[t, 7] = 0
+
+        # Feature 8: Price trend - recent return
+        # Short interest often responds to recent price movements
+        if len(close_prices) >= 5:
+            output[t, 8] = (close_prices[-1] / close_prices[-5]) - 1
+        else:
+            output[t, 8] = 0
+
+        # Feature 9: Short interest to price volatility ratio
+        # Short interest is more impactful in volatile stocks
+        if len(close_prices) >= 5:
+            returns = np.diff(close_prices[-5:]) / close_prices[-6:-1]
+            volatility = np.std(returns) + 1e-8
+            output[t, 9] = short_interest / volatility
+        else:
+            output[t, 9] = short_interest
+
+        # Feature 10: Volume trend - change in trading volume
+        # Volume changes often precede short interest changes
+        if t > 0:
+            prev_volume = data[t-1, 1]
+            output[t, 10] = (avg_volume / (prev_volume + 1e-8)) - 1
+        else:
+            output[t, 10] = 0
+
+        # Feature 11: Short interest relative to price level
+        # Normalizes short interest by price level to make comparable across stocks
+        avg_price = np.mean(close_prices)
+        output[t, 11] = short_interest / (avg_price + 1e-8)
+
+    # Final handling of any remaining NaN or inf values
+    output = np.nan_to_num(output)
+
+    # Analysis of approach compared to previous iterations:
+    # 1. We're returning to a focus on the original features that showed highest importance
+    #    in the baseline model (which had the best performance at 6.76% MAPE)
+    # 2. Previous iterations (1-3) added too many engineered features and moved away from
+    #    the original features, resulting in worse performance (10-11% MAPE)
+    # 3. This approach:
+    #    - Keeps the 5 most important original features from the baseline model
+    #    - Adds 7 carefully selected engineered features focused on short interest dynamics
+    #    - Uses fewer features than previous iterations to reduce overfitting risk
+    #    - Focuses on financial domain knowledge specific to short interest prediction
+    # 4. The engineered features capture:
+    #    - Short interest relative to volume (days to cover)
+    #    - Short interest momentum and relative changes
+    #    - Relationship between short interest and price movements
+    #    - Volume trends that might precede short interest changes
+    #    - Normalization of short interest by price level
+    # 5. We've avoided complex technical indicators that might introduce noise
+
+    return output
+```
+--------------------------------------------------
+❌ Error executing generated code: Function failed test execution: operands could not be broadcast together with shapes (4,) (5,)
+⚠️ Function execution failed (attempt 1/3)
+🔄 Retrying function execution with error feedback...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction from financial time series data.
+
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing:
+            - Feature_0: Short interest at time T
+            - Feature_1: Average daily volume quantity of past 15 days
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge cases
+    if data is None or len(data) == 0 or data.shape[1] != 62:
+        raise ValueError(f"Invalid input data shape: {data.shape if data is not None else None}")
+
+    lookback_window = data.shape[0]
+
+    # Initialize output array - using 12 features based on analysis
+    # The baseline model with original features performed best (MAPE 6.76%)
+    # We'll focus on the most important original features and add carefully selected derivatives
+    output = np.zeros((lookback_window, 12))
+
+    for t in range(lookback_window):
+        # Extract data for current timestamp and handle NaN values
+        current_data = np.nan_to_num(data[t])
+
+        # Extract OHLC data - reshape to get 15 days of OHLC data
+        ohlc_data = current_data[2:].reshape(15, 4)  # 15 days, 4 values (OHLC)
+
+        # Extract key components for readability
+        short_interest = current_data[0]  # Feature_0
+        avg_volume = current_data[1]      # Feature_1
+
+        # Feature 0: Short interest (Feature_0) - highest importance from baseline
+        output[t, 0] = short_interest
+
+        # Feature 1: Feature_35 - 2nd highest importance in baseline
+        output[t, 1] = current_data[35]
+
+        # Feature 2: Feature_5 - 3rd highest importance in baseline
+        output[t, 2] = current_data[5]
+
+        # Feature 3: Feature_17 - 4th highest importance in baseline
+        output[t, 3] = current_data[17]
+
+        # Feature 4: Average daily volume (Feature_1) - 5th highest importance
+        output[t, 4] = avg_volume
+
+        # Feature 5: Days to cover ratio (short interest / avg daily volume)
+        # This is a standard industry metric for short interest analysis
+        output[t, 5] = short_interest / (avg_volume + 1e-8)
+
+        # Extract close prices for trend analysis
+        close_prices = ohlc_data[:, 3]
+
+        # Feature 6: Short interest momentum (rate of change)
+        # This captures the trend in short interest which is predictive of future changes
+        if t > 0:
+            prev_short_interest = np.nan_to_num(data[t-1, 0])
+            output[t, 6] = (short_interest - prev_short_interest) / (prev_short_interest + 1e-8)
+        else:
+            output[t, 6] = 0
+
+        # Feature 7: Price trend - 5-day return
+        # Short interest often responds to recent price movements
+        if len(close_prices) >= 5:
+            output[t, 7] = (close_prices[-1] / close_prices[-5]) - 1
+        else:
+            output[t, 7] = 0
+
+        # Feature 8: Volatility (15-day)
+        # Short interest is often higher in volatile stocks
+        if len(close_prices) >= 2:
+            returns = np.diff(close_prices) / close_prices[:-1]
+            output[t, 8] = np.std(returns)
+        else:
+            output[t, 8] = 0
+
+        # Feature 9: Short interest relative to price level
+        # Normalizes short interest by price to make comparable across stocks
+        avg_price = np.mean(close_prices)
+        output[t, 9] = short_interest / (avg_price + 1e-8)
+
+        # Feature 10: Short interest to volume ratio * volatility
+        # Combines days to cover with volatility - higher values indicate
+        # potential for a short squeeze (harder to cover in volatile stocks)
+        output[t, 10] = output[t, 5] * output[t, 8]
+
+        # Feature 11: Interaction between price trend and short interest
+        # Captures relationship between price movement and short interest
+        # Negative values indicate short interest is high while prices are falling
+        output[t, 11] = short_interest * output[t, 7]
+
+    # Final handling of any remaining NaN or inf values
+    output = np.nan_to_num(output)
+
+    # Improvements over previous iterations:
+    # 1. Returning to the original features that showed highest importance in baseline
+    #    model (which had the best MAPE of 6.76%)
+    # 2. Previous iterations moved away from these important features, resulting in worse performance
+    # 3. Adding carefully selected financial ratios and indicators that are known
+    #    to be predictive of short interest movements
+    # 4. Including short interest momentum which captures the trend component
+    # 5. Adding interaction terms between price movements and short interest
+    # 6. Focusing on the relationship between volatility and short interest
+    # 7. Keeping the feature count moderate (12) to avoid overfitting while
+    #    capturing essential relationships
+
+    return output
+```
+--------------------------------------------------
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 12)
+✅ Function executed successfully and passed validation!
+
+🔧 Applying feature selection using claude function...
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Training data shape: (106, 4, 62) -> (106, 4, 12)
+Validation data shape: (36, 4, 62) -> (36, 4, 12)
+
+==================================================
+Training Iteration 4 (claude)
+==================================================
+Epoch 1/100, Train Loss: 0.019008
+Epoch 11/100, Train Loss: 0.017444
+Epoch 21/100, Train Loss: 0.016352
+Epoch 31/100, Train Loss: 0.011820
+Epoch 41/100, Train Loss: 0.010468
+Epoch 51/100, Train Loss: 0.008250
+Epoch 61/100, Train Loss: 0.006125
+Epoch 71/100, Train Loss: 0.007019
+Epoch 81/100, Train Loss: 0.005118
+Epoch 91/100, Train Loss: 0.005812
+
+Iteration 4 (claude) Performance:
+MAE: 9474554.7994
+RMSE: 10932852.5831
+MAPE: 8.40%
+
+📊 Calculating DL-based feature importance...
+📊 Calculating permutation-based feature importance...
+📈 DL-Based Feature Importance Analysis:
+   • Total features: 12
+   • Important features (top 10%): 9
+   • Highly important features (top 5%): 6
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_7: importance=0.0120, rank=1
+   2. Feature_6: importance=0.0048, rank=2
+   3. Feature_3: importance=0.0040, rank=3
+   4. Feature_2: importance=0.0027, rank=4
+   5. Feature_5: importance=0.0026, rank=5
+💾 Saved code for iteration 4 to iteration_codes dictionary
+📊 No significant improvement. Change: -1.64%
+
+📈 Current best MAPE: 6.76%
+🔄 Iterations without improvement: 4/5
+
+======================================================================
+ITERATION 5
+======================================================================
+🤖 Calling Claude for iteration 5...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction from financial time series data.
+
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing:
+            - Feature_0: Short interest at time T
+            - Feature_1: Average daily volume quantity of past 15 days
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge cases
+    if data is None or len(data) == 0 or data.shape[1] != 62:
+        raise ValueError(f"Invalid input data shape: {data.shape if data is not None else None}")
+
+    lookback_window = data.shape[0]
+
+    # Initialize output array - using 10 features
+    # Analysis of performance history shows the baseline model (MAPE 6.76%) outperformed all iterations
+    # This suggests we should focus primarily on the original features with highest importance
+    # and add only a few carefully selected derivative features
+    output = np.zeros((lookback_window, 10))
+
+    for t in range(lookback_window):
+        # Extract data for current timestamp and handle NaN values
+        current_data = np.nan_to_num(data[t])
+
+        # Extract OHLC data - reshape to get 15 days of OHLC data
+        ohlc_data = current_data[2:].reshape(15, 4)  # 15 days, 4 values (OHLC)
+
+        # Extract key components for readability
+        short_interest = current_data[0]  # Feature_0
+        avg_volume = current_data[1]      # Feature_1
+
+        # Feature 0: Short interest (Feature_0) - highest importance from baseline
+        output[t, 0] = short_interest
+
+        # Feature 1: Feature_35 - 2nd highest importance in baseline
+        # This corresponds to a specific day's OHLC value that was found important
+        output[t, 1] = current_data[35]
+
+        # Feature 2: Feature_5 - 3rd highest importance in baseline
+        output[t, 2] = current_data[5]
+
+        # Feature 3: Feature_17 - 4th highest importance in baseline
+        output[t, 3] = current_data[17]
+
+        # Feature 4: Average daily volume (Feature_1) - 5th highest importance
+        output[t, 4] = avg_volume
+
+        # Extract close prices for trend analysis
+        close_prices = ohlc_data[:, 3]
+
+        # Feature 5: Days to cover ratio (short interest / avg daily volume)
+        # This is a standard industry metric for short interest analysis
+        # Represents how many days it would take for short sellers to cover positions
+        output[t, 5] = short_interest / (avg_volume + 1e-8)
+
+        # Feature 6: Short interest relative to recent price movement
+        # Short sellers often respond to recent price changes
+        # Using 5-day price change to normalize short interest
+        if len(close_prices) >= 5:
+            price_change = (close_prices[-1] / close_prices[-5]) - 1
+            output[t, 6] = short_interest * (1 + price_change)
+        else:
+            output[t, 6] = short_interest
+
+        # Feature 7: Short interest acceleration
+        # Captures the second derivative of short interest
+        # Important for detecting changes in short selling momentum
+        if t >= 2:
+            prev_si = np.nan_to_num(data[t-1, 0])
+            prev_prev_si = np.nan_to_num(data[t-2, 0])
+
+            first_deriv_current = (short_interest - prev_si)
+            first_deriv_prev = (prev_si - prev_prev_si)
+
+            output[t, 7] = first_deriv_current - first_deriv_prev
+        else:
+            output[t, 7] = 0
+
+        # Feature 8: Relative short interest (compared to historical levels)
+        # Normalizes current short interest against its recent history
+        # Helps identify unusual levels of short interest
+        if t >= 3:
+            historical_si = [np.nan_to_num(data[t-i, 0]) for i in range(1, 4)]
+            avg_historical_si = np.mean(historical_si) + 1e-8
+            output[t, 8] = short_interest / avg_historical_si - 1
+        else:
+            output[t, 8] = 0
+
+        # Feature 9: Short interest to price volatility ratio
+        # Short sellers are often more active in volatile stocks
+        # This captures the relationship between short interest and price volatility
+        if len(close_prices) >= 5:
+            returns = np.diff(close_prices[-5:]) / close_prices[-6:-1]
+            volatility = np.std(returns) + 1e-8
+            output[t, 9] = short_interest / volatility
+        else:
+            output[t, 9] = short_interest
+
+    # Final handling of any remaining NaN or inf values
+    output = np.nan_to_num(output)
+
+    # Improvements over previous iterations:
+    # 1. Returning to original features with highest importance (Feature_0, Feature_35, Feature_5, Feature_17, Feature_1)
+    #    which were present in the baseline model with best MAPE of 6.76%
+    # 2. Reducing feature count from 12 to 10 to avoid overfitting
+    # 3. Adding short interest acceleration (second derivative) to capture momentum changes
+    # 4. Including relative short interest compared to historical levels
+    # 5. Focusing on the relationship between short interest and price volatility
+    # 6. Removed redundant features that showed low significance in previous iterations
+    # 7. Simplified the feature engineering approach to focus on what matters most
+    # 8. Previous iterations added too many derived features and moved away from the
+    #    original features that showed highest importance
+
+    return output
+```
+--------------------------------------------------
+❌ Error executing generated code: Function failed test execution: operands could not be broadcast together with shapes (4,) (5,)
+⚠️ Function execution failed (attempt 1/3)
+🔄 Retrying function execution with error feedback...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction from financial time series data.
+
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing:
+            - Feature_0: Short interest at time T
+            - Feature_1: Average daily volume quantity of past 15 days
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge cases
+    if data is None or len(data) == 0 or data.shape[1] != 62:
+        raise ValueError(f"Invalid input data shape: {data.shape if data is not None else None}")
+
+    lookback_window = data.shape[0]
+
+    # Initialize output array - using 10 features
+    # Analysis shows baseline model (MAPE 6.76%) outperformed all iterations
+    # Focus on original important features and minimal, high-value derivatives
+    output = np.zeros((lookback_window, 10))
+
+    for t in range(lookback_window):
+        # Extract data for current timestamp and handle NaN values
+        current_data = np.nan_to_num(data[t])
+
+        # Extract OHLC data - reshape to get 15 days of OHLC data
+        ohlc_data = current_data[2:].reshape(15, 4)  # 15 days, 4 values (OHLC)
+
+        # Extract key components for readability
+        short_interest = current_data[0]  # Feature_0
+        avg_volume = current_data[1]      # Feature_1
+
+        # Feature 0: Short interest (Feature_0) - highest importance from baseline
+        output[t, 0] = short_interest
+
+        # Feature 1: Feature_35 - 2nd highest importance in baseline
+        # This corresponds to a specific OHLC value that was highly predictive
+        output[t, 1] = current_data[35]
+
+        # Feature 2: Feature_5 - 3rd highest importance in baseline
+        output[t, 2] = current_data[5]
+
+        # Feature 3: Feature_17 - 4th highest importance in baseline
+        output[t, 3] = current_data[17]
+
+        # Feature 4: Average daily volume (Feature_1) - 5th highest importance
+        output[t, 4] = avg_volume
+
+        # Extract close prices for trend analysis
+        close_prices = ohlc_data[:, 3]
+
+        # Feature 5: Days to cover ratio (short interest / avg daily volume)
+        # This is a standard industry metric for short interest analysis
+        # Capped to prevent extreme values
+        days_to_cover = short_interest / (avg_volume + 1e-8)
+        output[t, 5] = np.clip(days_to_cover, 0, 30)  # Cap at reasonable maximum
+
+        # Feature 6: Short interest relative to historical range
+        # Normalize current short interest against recent history
+        if t > 0:
+            # Get historical short interest values
+            historical_si = np.array([np.nan_to_num(data[i, 0]) for i in range(max(0, t-3), t)])
+            if len(historical_si) > 0:
+                min_si = np.min(historical_si)
+                max_si = np.max(historical_si)
+                range_si = max_si - min_si
+                if range_si > 0:
+                    output[t, 6] = (short_interest - min_si) / range_si
+                else:
+                    output[t, 6] = 0.5  # Default to middle if no range
+            else:
+                output[t, 6] = 0.5
+        else:
+            output[t, 6] = 0.5
+
+        # Feature 7: Price trend - weighted recent return
+        # Short interest often responds to recent price movements
+        # Using exponentially weighted returns to emphasize recent price action
+        if len(close_prices) >= 5:
+            # Calculate returns with more weight on recent days
+            weights = np.array([0.1, 0.15, 0.2, 0.25, 0.3])  # Exponential weights
+            price_subset = close_prices[-5:]
+            returns = np.diff(price_subset) / price_subset[:-1]
+            output[t, 7] = np.sum(returns * weights[1:]) if len(returns) == 4 else 0
+        else:
+            output[t, 7] = 0
+
+        # Feature 8: Short interest momentum (rate of change)
+        # This captures the trend in short interest which is predictive of future changes
+        if t > 0:
+            prev_short_interest = np.nan_to_num(data[t-1, 0])
+            si_change = (short_interest - prev_short_interest) / (prev_short_interest + 1e-8)
+            # Clip to prevent extreme values
+            output[t, 8] = np.clip(si_change, -1, 1)
+        else:
+            output[t, 8] = 0
+
+        # Feature 9: Volatility-adjusted short interest
+        # Short interest is often higher in volatile stocks, but the relationship
+        # is non-linear and depends on recent volatility
+        if len(close_prices) >= 5:
+            returns = np.diff(close_prices[-5:]) / close_prices[-6:-1]
+            volatility = np.std(returns)
+            # Normalize short interest by volatility with dampening for extreme values
+            output[t, 9] = short_interest / (1 + 10 * volatility)
+        else:
+            output[t, 9] = short_interest
+
+    # Final handling of any remaining NaN or inf values
+    output = np.nan_to_num(output)
+
+    # Improvements over previous iterations:
+    # 1. Returning to original features with highest importance in baseline model (MAPE 6.76%)
+    # 2. Reducing feature count from 12 to 10 to avoid overfitting
+    # 3. Removing redundant features that showed low significance in previous iterations
+    # 4. Adding normalized short interest relative to historical range (Feature 6)
+    # 5. Implementing exponentially weighted price returns to emphasize recent price action
+    # 6. Clipping extreme values to prevent outliers from dominating the model
+    # 7. Adding volatility-adjusted short interest with non-linear relationship
+    # 8. Focusing on features that have clear financial interpretation and predictive power
+    # 9. Avoiding complex interaction terms that may have led to overfitting in previous iterations
+
+    return output
+```
+--------------------------------------------------
+❌ Error executing generated code: Function failed test execution: operands could not be broadcast together with shapes (4,) (5,)
+⚠️ Function execution failed (attempt 2/3)
+🔄 Retrying function execution with error feedback...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    """
+    Constructs features for short interest prediction from financial time series data.
+
+    Args:
+        data: numpy array of shape (lookback_window, 62) containing:
+            - Feature_0: Short interest at time T
+            - Feature_1: Average daily volume quantity of past 15 days
+            - Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge cases
+    if data is None or len(data) == 0:
+        raise ValueError(f"Invalid input data: empty or None")
+    if data.shape[1] != 62:
+        raise ValueError(f"Invalid input data shape: {data.shape}")
+
+    lookback_window = data.shape[0]
+
+    # Initialize output array - using 10 features
+    # Analysis shows the baseline model with original features performed best (MAPE 6.76%)
+    # We'll focus on the original important features and add minimal derivatives
+    output = np.zeros((lookback_window, 10))
+
+    for t in range(lookback_window):
+        # Extract data for current timestamp and handle NaN values
+        current_data = np.nan_to_num(data[t])
+
+        # Extract OHLC data - reshape to get 15 days of OHLC data
+        ohlc_data = current_data[2:].reshape(15, 4)  # 15 days, 4 values (OHLC)
+
+        # Extract key components for readability
+        short_interest = current_data[0]  # Feature_0
+        avg_volume = current_data[1]      # Feature_1
+
+        # Feature 0: Short interest (Feature_0) - highest importance from baseline
+        output[t, 0] = short_interest
+
+        # Feature 1: Feature_35 - 2nd highest importance in baseline
+        # This corresponds to a specific day's OHLC value
+        output[t, 1] = current_data[35]
+
+        # Feature 2: Feature_5 - 3rd highest importance in baseline
+        output[t, 2] = current_data[5]
+
+        # Feature 3: Feature_17 - 4th highest importance in baseline
+        output[t, 3] = current_data[17]
+
+        # Feature 4: Feature_1 (Average daily volume) - 5th highest importance
+        output[t, 4] = avg_volume
+
+        # Feature 5: Days to cover ratio (short interest / avg daily volume)
+        # This is a standard industry metric for short interest analysis
+        output[t, 5] = short_interest / (avg_volume + 1e-8)
+
+        # Extract close prices for trend analysis
+        close_prices = ohlc_data[:, 3]
+
+        # Feature 6: Short interest momentum (rate of change)
+        # This captures the trend in short interest which is predictive of future changes
+        if t > 0:
+            prev_short_interest = np.nan_to_num(data[t-1, 0])
+            output[t, 6] = (short_interest - prev_short_interest) / (prev_short_interest + 1e-8)
+        else:
+            output[t, 6] = 0
+
+        # Feature 7: Price trend - 5-day return
+        # Short interest often responds to recent price movements
+        if len(close_prices) >= 5:
+            output[t, 7] = (close_prices[-1] / close_prices[-5]) - 1
+        else:
+            output[t, 7] = 0
+
+        # Feature 8: Volatility (15-day)
+        # Short interest is often higher in volatile stocks
+        if len(close_prices) >= 2:
+            returns = np.diff(close_prices) / (close_prices[:-1] + 1e-8)
+            output[t, 8] = np.std(returns)
+        else:
+            output[t, 8] = 0
+
+        # Feature 9: Short interest to volume ratio change
+        # Captures the change in the days to cover ratio
+        if t > 0:
+            prev_days_to_cover = np.nan_to_num(data[t-1, 0]) / (np.nan_to_num(data[t-1, 1]) + 1e-8)
+            current_days_to_cover = output[t, 5]
+            output[t, 9] = (current_days_to_cover - prev_days_to_cover) / (prev_days_to_cover + 1e-8)
+        else:
+            output[t, 9] = 0
+
+    # Final handling of any remaining NaN or inf values
+    output = np.nan_to_num(output)
+
+    # Improvements over previous iterations:
+    # 1. Returning to the original features that showed highest importance in baseline
+    #    model (which had the best MAPE of 6.76%)
+    # 2. Reducing feature count from 12 to 10 to avoid overfitting
+    # 3. Removed less significant features from previous iteration:
+    #    - Short interest relative to price level
+    #    - Short interest to volume ratio * volatility
+    #    - Interaction between price trend and short interest
+    # 4. Added a new feature: Short interest to volume ratio change
+    #    This captures the dynamics of the days to cover ratio
+    # 5. Simplified the approach to focus on the most important original features
+    #    and only the most financially relevant derived features
+    # 6. Improved numerical stability with additional epsilon values in divisions
+    # 7. Maintained the temporal structure of the data for LSTM compatibility
+
+    return output
+```
+--------------------------------------------------
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 10)
+✅ Function executed successfully and passed validation!
+
+🔧 Applying feature selection using claude function...
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Training data shape: (106, 4, 62) -> (106, 4, 10)
+Validation data shape: (36, 4, 62) -> (36, 4, 10)
+
+==================================================
+Training Iteration 5 (claude)
+==================================================
+Epoch 1/100, Train Loss: 0.019234
+Epoch 11/100, Train Loss: 0.016258
+Epoch 21/100, Train Loss: 0.013848
+Epoch 31/100, Train Loss: 0.011377
+Epoch 41/100, Train Loss: 0.008540
+Epoch 51/100, Train Loss: 0.010293
+Epoch 61/100, Train Loss: 0.004899
+Epoch 71/100, Train Loss: 0.005879
+Epoch 81/100, Train Loss: 0.007637
+Epoch 91/100, Train Loss: 0.004179
+
+Iteration 5 (claude) Performance:
+MAE: 11782061.2780
+RMSE: 14362589.4256
+MAPE: 10.34%
+
+📊 Calculating DL-based feature importance...
+📊 Calculating permutation-based feature importance...
+📈 DL-Based Feature Importance Analysis:
+   • Total features: 10
+   • Important features (top 10%): 9
+   • Highly important features (top 5%): 9
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_7: importance=0.0098, rank=1
+   2. Feature_6: importance=0.0050, rank=2
+   3. Feature_5: importance=0.0045, rank=3
+   4. Feature_9: importance=0.0041, rank=4
+   5. Feature_3: importance=0.0030, rank=5
+💾 Saved code for iteration 5 to iteration_codes dictionary
+📊 No significant improvement. Change: -3.58%
+
+🛑 Stopping: No improvement for 5 consecutive iterations
+
+🎯 Final Evaluation on Test Set (Unseen Data)
+======================================================================
+Using train+validation data for final model training to maximize data usage
+Combined train+val data shape: (142, 4, 62)
+Test data shape: (36, 4, 62)
+
+📊 BASELINE EVALUATION (Raw Features, Train+Val → Test):
+
+==================================================
+Training Baseline Final (Raw Features)
+==================================================
+Epoch 1/100, Train Loss: 0.014275
+Epoch 11/100, Train Loss: 0.013708
+Epoch 21/100, Train Loss: 0.014017
+Epoch 31/100, Train Loss: 0.013375
+Epoch 41/100, Train Loss: 0.013489
+Epoch 51/100, Train Loss: 0.013014
+Epoch 61/100, Train Loss: 0.012861
+Epoch 71/100, Train Loss: 0.013512
+Epoch 81/100, Train Loss: 0.011914
+Epoch 91/100, Train Loss: 0.012539
+Early stopping at epoch 94
+
+Baseline Final (Raw Features) Performance:
+MAE: 9819456.6507
+RMSE: 12725732.1085
+MAPE: 7.78%
+
+📊 Calculating DL-based feature importance...
+📊 Calculating permutation-based feature importance...
+📈 DL-Based Feature Importance Analysis:
+   • Total features: 62
+   • Important features (top 10%): 1
+   • Highly important features (top 5%): 1
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_0: importance=0.0113, rank=1
+   2. Feature_1: importance=0.0011, rank=2
+   3. Feature_39: importance=0.0009, rank=3
+   4. Feature_48: importance=0.0009, rank=4
+   5. Feature_42: importance=0.0006, rank=5
+   Baseline MAPE: 7.78%
+   Baseline MAE: 9819456.6507
+   Baseline RMSE: 12725732.1085
+
+🔧 BEST MODEL EVALUATION (Processed Features, Train+Val → Test):
+Applying best feature engineering to all data...
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 12)
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Processed train+val shape: (142, 4, 12)
+Processed test shape: (36, 4, 12)
+
+==================================================
+Training Best Model Final (Processed Features)
+==================================================
+Epoch 1/100, Train Loss: 0.014394
+Epoch 11/100, Train Loss: 0.013072
+Epoch 21/100, Train Loss: 0.010163
+Epoch 31/100, Train Loss: 0.006500
+Epoch 41/100, Train Loss: 0.005807
+Epoch 51/100, Train Loss: 0.005003
+Epoch 61/100, Train Loss: 0.006095
+Early stopping at epoch 67
+
+Best Model Final (Processed Features) Performance:
+MAE: 11212816.3937
+RMSE: 14645870.2297
+MAPE: 8.68%
+
+📊 Calculating DL-based feature importance...
+📊 Calculating permutation-based feature importance...
+📈 DL-Based Feature Importance Analysis:
+   • Total features: 12
+   • Important features (top 10%): 10
+   • Highly important features (top 5%): 6
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_7: importance=0.0077, rank=1
+   2. Feature_5: importance=0.0047, rank=2
+   3. Feature_0: importance=0.0033, rank=3
+   4. Feature_6: importance=0.0029, rank=4
+   5. Feature_1: importance=0.0016, rank=5
+
+📊 Best Model Test Set Performance:
+   MAPE: 8.68%
+   MAE: 11212816.3937
+   RMSE: 14645870.2297
+
+🎯 IMPROVEMENT OVER BASELINE:
+   Baseline MAPE: 7.78%
+   Best Model MAPE: 8.68%
+   Absolute Improvement: -0.90%
+   Relative Improvement: -11.5%
+
+======================================================================
+ITERATION PERFORMANCE SUMMARY
+======================================================================
+
+📊 VALIDATION MAPE TREND:
+--------------------------------------------------
+Iteration  Model                     Validation MAPE Improvement
+--------------------------------------------------
+0          Baseline                  6.76            Baseline
+1          Iteration 1               10.22           -3.46%
+2          Iteration 2               10.99           -4.23%
+3          Iteration 3               10.95           -4.20%
+4          Iteration 4               8.40            -1.64%
+5          Iteration 5               10.34           -3.58%
+--------------------------------------------------
+🏆 Best: Baseline - MAPE: 6.76%
+✅ Saved AAPL results to cache/AAPL_iterative_results_enhanced.pkl
+✅ Summary report saved for AAPL
+
+🎉 Process completed successfully for AAPL!

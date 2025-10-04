@@ -1,3 +1,8 @@
 # Ignore the entire data folder
 /data/
 /notebooks/cache/
+
+# Environment variables
+.env
+.env.local
+.env.*.local

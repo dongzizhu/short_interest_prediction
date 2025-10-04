@@ -1,0 +1,3042 @@
+============================================================
+ITERATIVE AGENT-BASED FEATURE SELECTION SUMMARY
+============================================================
+Stock: CULP
+Date: 2025-09-26 01:57:24
+Total Iterations: 10
+
+PERFORMANCE TREND:
+----------------------------------------
+Iteration 0: Baseline - MAPE: 60.85% (Baseline)
+Iteration 1: Iteration 1 - MAPE: 60.08% (+0.77%)
+Iteration 2: Iteration 2 - MAPE: 69.52% (-9.44%)
+Iteration 3: Iteration 3 - MAPE: 57.46% (+2.62%)
+Iteration 4: Iteration 4 - MAPE: 53.03% (+4.42%)
+Iteration 5: Iteration 5 - MAPE: 42.00% (+11.04%)
+Iteration 6: Iteration 6 - MAPE: 48.27% (-6.28%)
+Iteration 7: Iteration 7 - MAPE: 42.54% (-0.54%)
+Iteration 8: Iteration 8 - MAPE: 54.38% (-12.39%)
+Iteration 9: Iteration 9 - MAPE: 42.35% (-0.35%)
+Iteration 10: Iteration 10 - MAPE: 47.72% (-5.72%)
+
+Best Model: Iteration 5 - MAPE: 42.00%
+Final Test MAPE: 65.91%
+Final Improvement: -19.66%
+
+============================================================
+FEATURE ENGINEERING CODES
+============================================================
+
+ITERATION 1:
+Performance: MAPE = 60.08%
+Improvement: +0.77%
+Features: 17
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 20))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    
+    # Based on DL feature importance, Feature_0 (short interest) and Feature_1 (volume)
+    # were most important, followed by certain OHLC features
+    
+    # Create output array to store engineered features
+    engineered_features = []
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]  # Most important feature (0.0243)
+        avg_volume = current_data[1]      # Second most important feature (0.0059)
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature set 1: Keep original important features
+        features = [
+            short_interest,                    # Original short interest (most important)
+            avg_volume,                        # Original volume (second most important)
+        ]
+        
+        # Feature set 2: Short interest relative metrics
+        if t > 0:
+            prev_short_interest = data[t-1, 0]
+            prev_short_interest = 0 if np.isnan(prev_short_interest) else prev_short_interest
+            
+            # Short interest momentum (change)
+            si_change = short_interest - prev_short_interest
+            si_pct_change = si_change / (prev_short_interest + 1e-8)  # Avoid division by zero
+            
+            features.extend([
+                si_change,                     # Absolute change in short interest
+                si_pct_change,                 # Percentage change in short interest
+            ])
+        else:
+            # For the first timestamp, use zeros as placeholders
+            features.extend([0, 0])
+        
+        # Feature set 3: Volume relative metrics
+        # Volume relative to price movement
+        price_range = np.mean(highs - lows)
+        vol_to_range = avg_volume / (price_range + 1e-8)
+        
+        # Volume trend
+        recent_vol = np.mean(ohlc_data[-5:, 3] - ohlc_data[-5:, 0])  # Mean of recent (Close-Open)
+        vol_trend = recent_vol * avg_volume
+        
+        features.extend([
+            vol_to_range,                      # Volume relative to price range
+            vol_trend,                         # Volume trend indicator
+        ])
+        
+        # Feature set 4: Price action metrics
+        # Based on importance of Feature_48, Feature_17, Feature_46
+        
+        # Price momentum features
+        price_momentum_5d = closes[-1] / (closes[-5] + 1e-8) - 1
+        price_momentum_10d = closes[-1] / (closes[-10] + 1e-8) - 1
+        
+        # Volatility features
+        volatility_5d = np.std(closes[-5:]) / (np.mean(closes[-5:]) + 1e-8)
+        volatility_10d = np.std(closes[-10:]) / (np.mean(closes[-10:]) + 1e-8)
+        
+        # High-Low range features
+        hl_range_5d = np.mean(highs[-5:] - lows[-5:]) / (np.mean(closes[-5:]) + 1e-8)
+        hl_range_10d = np.mean(highs[-10:] - lows[-10:]) / (np.mean(closes[-10:]) + 1e-8)
+        
+        features.extend([
+            price_momentum_5d,                 # 5-day price momentum
+            price_momentum_10d,                # 10-day price momentum
+            volatility_5d,                     # 5-day price volatility
+            volatility_10d,                    # 10-day price volatility
+            hl_range_5d,                       # 5-day high-low range
+            hl_range_10d,                      # 10-day high-low range
+        ])
+        
+        # Feature set 5: Technical indicators
+        # Moving averages
+        ma_5d = np.mean(closes[-5:])
+        ma_10d = np.mean(closes[-10:])
+        ma_ratio = ma_5d / (ma_10d + 1e-8)
+        
+        # RSI-like indicator (simplified)
+        gains = np.array([max(0, closes[i] - closes[i-1]) for i in range(1, len(closes))])
+        losses = np.array([max(0, closes[i-1] - closes[i]) for i in range(1, len(closes))])
+        avg_gain = np.mean(gains[-10:]) if len(gains) >= 10 else np.mean(gains)
+        avg_loss = np.mean(losses[-10:]) if len(losses) >= 10 else np.mean(losses)
+        rs = avg_gain / (avg_loss + 1e-8)
+        rsi = 100 - (100 / (1 + rs))
+        
+        features.extend([
+            ma_ratio,                          # Ratio of short-term to long-term MA
+            rsi,                               # RSI-like indicator
+        ])
+        
+        # Feature set 6: Interaction terms between important features
+        # Interaction between short interest and volume
+        si_vol_interaction = short_interest * avg_volume
+        
+        # Interaction between short interest and price momentum
+        si_momentum_interaction = short_interest * price_momentum_5d
+        
+        # Interaction between volume and volatility
+        vol_volatility_interaction = avg_volume * volatility_5d
+        
+        features.extend([
+            si_vol_interaction,                # Short interest × volume interaction
+            si_momentum_interaction,           # Short interest × price momentum interaction
+            vol_volatility_interaction,        # Volume × volatility interaction
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN values
+    result = np.nan_to_num(result, nan=0.0)
+    
+    return result
+============================================================
+
+ITERATION 2:
+Performance: MAPE = 69.52%
+Improvement: -9.44%
+Features: 25
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 25))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Based on DL feature importance analysis, features 13, 12, 14, 10, and 3 were most important
+    # These correspond to specific days in the OHLC data, suggesting certain time periods
+    # are more predictive than others
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature set 1: Core features - retain original important features
+        features = [
+            short_interest,                    # Original short interest
+            avg_volume,                        # Original volume
+        ]
+        
+        # Feature set 2: Enhanced short interest metrics
+        # Previous iteration showed short interest change was valuable
+        if t > 0:
+            prev_short_interest = data[t-1, 0]
+            prev_short_interest = 0 if np.isnan(prev_short_interest) else prev_short_interest
+            
+            # Short interest momentum (change)
+            si_change = short_interest - prev_short_interest
+            si_pct_change = si_change / (prev_short_interest + 1e-8)
+            
+            # Add exponential smoothing of short interest (new)
+            alpha = 0.7  # Weight for current observation
+            if t > 1:
+                prev_smoothed_si = data[t-2, 0] * (1-alpha) + prev_short_interest * alpha
+                si_smoothed_change = short_interest - prev_smoothed_si
+                si_smoothed_pct_change = si_smoothed_change / (prev_smoothed_si + 1e-8)
+            else:
+                si_smoothed_change = si_change
+                si_smoothed_pct_change = si_pct_change
+            
+            features.extend([
+                si_change,                     # Absolute change in short interest
+                si_pct_change,                 # Percentage change in short interest
+                si_smoothed_change,            # Change from exponentially smoothed SI (new)
+                si_smoothed_pct_change,        # Percent change from smoothed SI (new)
+            ])
+        else:
+            # For the first timestamp, use zeros as placeholders
+            features.extend([0, 0, 0, 0])
+        
+        # Feature set 3: Enhanced volume metrics
+        # Focus on more sophisticated volume patterns
+        
+        # Volume trend over different timeframes
+        vol_trend_3d = np.mean(closes[-3:] - opens[-3:]) * avg_volume  # Short-term
+        vol_trend_7d = np.mean(closes[-7:] - opens[-7:]) * avg_volume  # Medium-term
+        
+        # Volume acceleration (new)
+        recent_vol_change = np.mean(closes[-3:] - opens[-3:]) - np.mean(closes[-7:-3] - opens[-7:-3])
+        vol_acceleration = recent_vol_change * avg_volume
+        
+        # Volume relative to price movement (enhanced)
+        price_range = np.mean(highs - lows)
+        vol_to_range = avg_volume / (price_range + 1e-8)
+        
+        # Volume oscillator (new)
+        vol_ma_5 = np.mean(np.abs(closes[-5:] - opens[-5:]))
+        vol_ma_10 = np.mean(np.abs(closes[-10:] - opens[-10:]))
+        vol_oscillator = (vol_ma_5 - vol_ma_10) / (vol_ma_10 + 1e-8)
+        
+        features.extend([
+            vol_trend_3d,                      # 3-day volume trend
+            vol_trend_7d,                      # 7-day volume trend
+            vol_acceleration,                  # Volume acceleration (new)
+            vol_to_range,                      # Volume relative to price range
+            vol_oscillator,                    # Volume oscillator (new)
+        ])
+        
+        # Feature set 4: Price action metrics focused on important days
+        # Based on DL importance, features 13, 12, 14, 10, 3 were most important
+        # These correspond to specific days in the OHLC data
+        
+        # Extract data from important days (these are indices in the 15-day window)
+        # Feature indices 13, 12, 14 correspond to days 3, 3, 3 (different OHLC components)
+        # Feature indices 10, 3 correspond to days 2, 0
+        important_days = [3, 2, 0]  # Days that were most important based on feature importance
+        
+        # Create features focused on these important days
+        important_day_returns = [closes[day]/opens[day] - 1 for day in important_days]
+        important_day_ranges = [(highs[day] - lows[day])/opens[day] for day in important_days]
+        
+        # Add these important day-specific features
+        features.extend(important_day_returns)
+        features.extend(important_day_ranges)
+        
+        # Feature set 5: Enhanced technical indicators
+        
+        # Improved RSI calculation
+        up_moves = np.array([max(0, closes[i] - closes[i-1]) for i in range(1, len(closes))])
+        down_moves = np.array([max(0, closes[i-1] - closes[i]) for i in range(1, len(closes))])
+        
+        # Calculate RSI with different lookback periods
+        def calc_rsi(up, down, period):
+            if len(up) < period:
+                return 50  # Default to neutral if not enough data
+            avg_up = np.mean(up[-period:])
+            avg_down = np.mean(down[-period:])
+            rs = avg_up / (avg_down + 1e-8)
+            return 100 - (100 / (1 + rs))
+        
+        rsi_7 = calc_rsi(up_moves, down_moves, 7)
+        rsi_14 = calc_rsi(up_moves, down_moves, 14)
+        
+        # MACD-like indicator (new)
+        ema_12 = np.mean(closes[-5:])  # Simplified EMA calculation
+        ema_26 = np.mean(closes[-10:])
+        macd = ema_12 - ema_26
+        
+        # Bollinger Band width (new)
+        sma_20 = np.mean(closes[-10:])  # Using 10 days instead of 20 due to data constraints
+        std_20 = np.std(closes[-10:])
+        bb_width = (2 * std_20) / (sma_20 + 1e-8)
+        
+        features.extend([
+            rsi_7,                             # 7-day RSI
+            rsi_14,                            # 14-day RSI
+            macd,                              # MACD-like indicator
+            bb_width,                          # Bollinger Band width
+        ])
+        
+        # Feature set 6: Advanced interaction terms
+        # Focus on interactions between the most important features
+        
+        # Interaction between short interest and important day returns
+        si_day3_interaction = short_interest * important_day_returns[0]
+        
+        # Interaction between volume and important day ranges
+        vol_day3_interaction = avg_volume * important_day_ranges[0]
+        
+        # Interaction between RSI and short interest (new)
+        rsi_si_interaction = rsi_7 * short_interest / 100  # Normalize RSI
+        
+        # Interaction between volume and MACD (new)
+        vol_macd_interaction = avg_volume * macd
+        
+        features.extend([
+            si_day3_interaction,               # Short interest × important day return
+            vol_day3_interaction,              # Volume × important day range
+            rsi_si_interaction,                # RSI × short interest
+            vol_macd_interaction,              # Volume × MACD
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    return result
+============================================================
+
+ITERATION 3:
+Performance: MAPE = 57.46%
+Improvement: +2.62%
+Features: 27
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 20))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Analysis of previous iterations:
+    # - Iteration 1 (MAPE 60.08%) was better than Iteration 2 (MAPE 69.52%)
+    # - Features 13, 12, 14, 10, 3 were most important in the best model
+    # - These correspond to specific OHLC data points that are highly predictive
+    # - Simpler feature set may be more effective than overly complex features
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature set 1: Core features - retain original important features
+        features = [
+            short_interest,                    # Original short interest
+            avg_volume,                        # Original volume
+        ]
+        
+        # Feature set 2: Short interest dynamics
+        # Focusing on simpler, more direct metrics that worked in iteration 1
+        if t > 0:
+            prev_short_interest = data[t-1, 0]
+            prev_short_interest = 0 if np.isnan(prev_short_interest) else prev_short_interest
+            
+            # Short interest change metrics
+            si_change = short_interest - prev_short_interest
+            si_pct_change = si_change / (prev_short_interest + 1e-8)
+            
+            features.extend([
+                si_change,                     # Absolute change in short interest
+                si_pct_change,                 # Percentage change in short interest
+            ])
+        else:
+            # For the first timestamp, use zeros as placeholders
+            features.extend([0, 0])
+        
+        # Feature set 3: Volume-price relationship
+        # Based on importance of features 13, 12, 14 (which relate to price-volume dynamics)
+        
+        # Volume relative to price movement
+        avg_price_range = np.mean(highs - lows)
+        vol_to_range = avg_volume / (avg_price_range + 1e-8)
+        
+        # Volume trend
+        vol_price_trend = np.mean(closes - opens) * avg_volume
+        
+        features.extend([
+            vol_to_range,                      # Volume relative to price range
+            vol_price_trend,                   # Volume-weighted price trend
+        ])
+        
+        # Feature set 4: Focus on important days based on DL feature importance
+        # Features 13, 12, 14 correspond to day 3 (different OHLC components)
+        # Features 10, 3 correspond to days 2, 0
+        
+        # Day indices that were most important (0-indexed)
+        important_days = [3, 2, 0]
+        
+        # Extract raw OHLC values for these important days
+        for day in important_days:
+            if day < len(opens):
+                features.extend([
+                    opens[day],                # Open price
+                    highs[day],                # High price
+                    lows[day],                 # Low price
+                    closes[day],               # Close price
+                ])
+            else:
+                features.extend([0, 0, 0, 0])  # Padding if day is out of range
+        
+        # Feature set 5: Technical indicators focused on important days
+        
+        # Calculate returns and ranges for important days
+        for day in important_days:
+            if day < len(opens) and day > 0:
+                # Daily return
+                daily_return = closes[day]/opens[day] - 1
+                
+                # Daily range relative to open
+                daily_range = (highs[day] - lows[day])/opens[day]
+                
+                # Previous day momentum
+                prev_momentum = closes[day]/closes[day-1] - 1
+                
+                features.extend([
+                    daily_return,              # Daily return
+                    daily_range,               # Daily range
+                    prev_momentum,             # Previous day momentum
+                ])
+            else:
+                features.extend([0, 0, 0])     # Padding if day is out of range
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    return result
+============================================================
+
+ITERATION 4:
+Performance: MAPE = 53.03%
+Improvement: +4.42%
+Features: 40
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 30))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Analysis of previous iterations:
+    # - Iteration 3 (MAPE 57.46%) was the best so far
+    # - Feature_0 (short interest) and Feature_1 (volume) consistently appear as important
+    # - Feature_19, Feature_23, Feature_21 were important in the best model
+    # - These correspond to specific OHLC data points that are highly predictive
+    # - Improvements in Iteration 3 came from focusing on specific important days
+    # - Will enhance this approach with more sophisticated financial indicators
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature set 1: Core features - retain original important features
+        features = [
+            short_interest,                    # Original short interest - consistently important
+            avg_volume,                        # Original volume - consistently important
+        ]
+        
+        # Feature set 2: Short interest dynamics with enhanced metrics
+        if t > 0:
+            prev_short_interest = data[t-1, 0]
+            prev_short_interest = 0 if np.isnan(prev_short_interest) else prev_short_interest
+            
+            # Short interest change metrics
+            si_change = short_interest - prev_short_interest
+            si_pct_change = si_change / (prev_short_interest + 1e-8)
+            
+            # Enhanced SI metrics - looking at acceleration and relative to volume
+            if t > 1:
+                prev_prev_si = data[t-2, 0]
+                prev_prev_si = 0 if np.isnan(prev_prev_si) else prev_prev_si
+                prev_si_change = prev_short_interest - prev_prev_si
+                si_acceleration = si_change - prev_si_change
+                features.extend([
+                    si_change,                     # Absolute change in short interest
+                    si_pct_change,                 # Percentage change in short interest
+                    si_acceleration,               # Acceleration of short interest changes
+                    si_change / (avg_volume + 1e-8) # SI change relative to volume
+                ])
+            else:
+                features.extend([si_change, si_pct_change, 0, 0])
+        else:
+            # For the first timestamp, use zeros as placeholders
+            features.extend([0, 0, 0, 0])
+        
+        # Feature set 3: Volume-price relationship (enhanced)
+        # Volume relative to price movement
+        avg_price_range = np.mean(highs - lows)
+        vol_to_range = avg_volume / (avg_price_range + 1e-8)
+        
+        # Volume trend and volatility
+        vol_price_trend = np.mean(closes - opens) * avg_volume
+        
+        # Volume relative to price volatility
+        price_volatility = np.std(closes) / (np.mean(closes) + 1e-8)
+        vol_to_volatility = avg_volume * price_volatility
+        
+        # Volume momentum (change in volume)
+        vol_momentum = 0
+        if t > 0:
+            prev_vol = data[t-1, 1]
+            prev_vol = 0 if np.isnan(prev_vol) else prev_vol
+            vol_momentum = (avg_volume / (prev_vol + 1e-8)) - 1
+        
+        features.extend([
+            vol_to_range,                      # Volume relative to price range
+            vol_price_trend,                   # Volume-weighted price trend
+            vol_to_volatility,                 # Volume relative to price volatility
+            vol_momentum,                      # Volume momentum
+        ])
+        
+        # Feature set 4: Focus on important days based on DL feature importance
+        # Based on feature importance analysis, days 4, 5, and 7 seem important
+        # (corresponding to features 19, 23, 21)
+        
+        # Important days (0-indexed)
+        important_days = [4, 5, 7]
+        
+        # Extract raw OHLC values for these important days
+        for day in important_days:
+            if day < len(opens):
+                features.extend([
+                    opens[day],                # Open price
+                    highs[day],                # High price
+                    lows[day],                 # Low price
+                    closes[day],               # Close price
+                ])
+            else:
+                features.extend([0, 0, 0, 0])  # Padding if day is out of range
+        
+        # Feature set 5: Technical indicators focused on important days
+        for day in important_days:
+            if day < len(opens) and day > 0:
+                # Daily return
+                daily_return = closes[day]/opens[day] - 1
+                
+                # Daily range relative to open
+                daily_range = (highs[day] - lows[day])/opens[day]
+                
+                # Previous day momentum
+                prev_momentum = closes[day]/closes[day-1] - 1
+                
+                # Intraday volatility
+                intraday_vol = (highs[day] - lows[day])/(opens[day] + 1e-8)
+                
+                features.extend([
+                    daily_return,              # Daily return
+                    daily_range,               # Daily range
+                    prev_momentum,             # Previous day momentum
+                    intraday_vol,              # Intraday volatility
+                ])
+            else:
+                features.extend([0, 0, 0, 0])  # Padding if day is out of range
+        
+        # Feature set 6: Advanced technical indicators
+        # Calculate moving averages for close prices
+        if len(closes) >= 5:
+            ma5 = np.mean(closes[:5])
+            ma5_ratio = closes[0]/ma5 - 1  # Current price relative to 5-day MA
+            
+            # Bollinger Bands (using 5-day window)
+            std5 = np.std(closes[:5])
+            upper_band = ma5 + (2 * std5)
+            lower_band = ma5 - (2 * std5)
+            bb_width = (upper_band - lower_band)/(ma5 + 1e-8)  # Normalized BB width
+            bb_position = (closes[0] - lower_band)/(upper_band - lower_band + 1e-8)  # Position within bands
+            
+            features.extend([
+                ma5_ratio,                     # Price relative to 5-day MA
+                bb_width,                      # Bollinger Band width (volatility)
+                bb_position,                   # Position within Bollinger Bands
+            ])
+        else:
+            features.extend([0, 0, 0])
+        
+        # Feature set 7: Short interest relative to market indicators
+        # SI relative to price movement
+        si_to_price_change = short_interest / (np.abs(closes[0] - opens[0]) + 1e-8)
+        
+        # SI relative to volatility
+        si_to_volatility = short_interest * price_volatility
+        
+        # SI to volume ratio
+        si_to_volume = short_interest / (avg_volume + 1e-8)
+        
+        features.extend([
+            si_to_price_change,               # SI relative to price movement
+            si_to_volatility,                 # SI relative to volatility
+            si_to_volume,                     # SI to volume ratio
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    return result
+============================================================
+
+ITERATION 5:
+Performance: MAPE = 42.00%
+Improvement: +11.04%
+Features: 36
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 45))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Analysis of previous iterations:
+    # - Iteration 4 (MAPE 53.03%) was the best so far
+    # - Feature_0 (short interest), Feature_4, Feature_39, Feature_38, Feature_5 were most important
+    # - Previous iteration had 34/40 significant features, suggesting good direction
+    # - Will enhance with more sophisticated financial indicators and focus on the most important features
+    # - Will add more emphasis on price patterns and technical indicators that correlate with short interest
+    # - Will improve handling of temporal relationships and add more robust normalization
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature set 1: Core features - retain original important features
+        # These have consistently shown importance across iterations
+        features = [
+            short_interest,                    # Original short interest - consistently important
+            avg_volume,                        # Original volume - consistently important
+            short_interest / (avg_volume + 1e-8)  # SI to volume ratio - key relationship
+        ]
+        
+        # Feature set 2: Short interest dynamics with enhanced metrics
+        # Improved from previous iteration with more robust calculations and normalization
+        si_history = []
+        for i in range(min(3, t+1)):
+            prev_si = data[t-i, 0] if t-i >= 0 else 0
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_history.append(prev_si)
+            
+        # Short interest change metrics with better normalization
+        if len(si_history) > 1:
+            si_change = si_history[0] - si_history[1]
+            # Use log1p for better handling of percentage changes
+            si_pct_change = np.log1p(si_history[0]) - np.log1p(si_history[1])
+            # Normalize by market cap proxy (price * volume)
+            si_change_norm = si_change / (closes[0] * avg_volume + 1e-8)
+            
+            features.extend([
+                si_change,                     # Absolute change in short interest
+                si_pct_change,                 # Log-normalized percentage change in short interest
+                si_change_norm,                # SI change normalized by market cap proxy
+            ])
+            
+            # Add acceleration metrics if we have enough history
+            if len(si_history) > 2:
+                prev_si_change = si_history[1] - si_history[2]
+                si_acceleration = si_change - prev_si_change
+                si_accel_norm = si_acceleration / (si_history[1] + 1e-8)  # Normalized acceleration
+                
+                features.extend([
+                    si_acceleration,           # Acceleration of short interest changes
+                    si_accel_norm,             # Normalized acceleration
+                ])
+            else:
+                features.extend([0, 0])
+        else:
+            features.extend([0, 0, 0, 0, 0])
+        
+        # Feature set 3: Volume dynamics and relationships
+        # Enhanced from previous iteration with more sophisticated metrics
+        
+        # Volume trend over different time periods
+        vol_5d_ratio = 0
+        vol_trend = 0
+        
+        if len(closes) >= 5:
+            # Calculate volume trend using exponential weighting
+            weights = np.array([0.4, 0.3, 0.15, 0.1, 0.05])
+            price_changes = np.diff(np.concatenate([[opens[0]], closes[:4]]))
+            # Direction-weighted volume trend
+            vol_trend = np.sum(weights[:len(price_changes)] * np.sign(price_changes) * avg_volume)
+            
+            # Volume relative to price movement with improved calculation
+            price_range_5d = np.mean(highs[:5] - lows[:5])
+            vol_to_range_5d = avg_volume / (price_range_5d + 1e-8)
+            
+            # Volume volatility
+            vol_history = []
+            for i in range(min(5, t+1)):
+                prev_vol = data[t-i, 1] if t-i >= 0 else avg_volume
+                prev_vol = avg_volume if np.isnan(prev_vol) else prev_vol
+                vol_history.append(prev_vol)
+            
+            vol_volatility = np.std(vol_history) / (np.mean(vol_history) + 1e-8)
+            
+            features.extend([
+                vol_trend,                     # Direction-weighted volume trend
+                vol_to_range_5d,               # Volume relative to 5-day price range
+                vol_volatility,                # Volume volatility
+            ])
+        else:
+            features.extend([0, 0, 0])
+        
+        # Feature set 4: Price dynamics and technical indicators
+        # Significantly enhanced from previous iteration
+        
+        # Basic price metrics
+        if len(closes) > 0:
+            current_close = closes[0]
+            current_open = opens[0]
+            
+            # Daily return and range
+            daily_return = current_close/current_open - 1 if current_open != 0 else 0
+            daily_range = (highs[0] - lows[0])/(current_open + 1e-8)
+            
+            # Price momentum over different timeframes
+            momentum_1d = 0
+            momentum_3d = 0
+            momentum_5d = 0
+            
+            if len(closes) > 1:
+                momentum_1d = current_close/closes[1] - 1
+            
+            if len(closes) >= 3:
+                momentum_3d = current_close/closes[2] - 1
+            
+            if len(closes) >= 5:
+                momentum_5d = current_close/closes[4] - 1
+            
+            features.extend([
+                daily_return,                  # Daily return
+                daily_range,                   # Daily range relative to open
+                momentum_1d,                   # 1-day momentum
+                momentum_3d,                   # 3-day momentum
+                momentum_5d,                   # 5-day momentum
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0])
+        
+        # Feature set 5: Advanced technical indicators
+        # Significantly expanded from previous iteration
+        
+        if len(closes) >= 5:
+            # Moving averages
+            ma5 = np.mean(closes[:5])
+            ma3 = np.mean(closes[:3]) if len(closes) >= 3 else closes[0]
+            
+            # Price relative to moving averages
+            price_to_ma5 = current_close/ma5 - 1
+            price_to_ma3 = current_close/ma3 - 1
+            
+            # Moving average convergence/divergence
+            macd = ma3 - ma5
+            
+            # Bollinger Bands
+            std5 = np.std(closes[:5])
+            upper_band = ma5 + (2 * std5)
+            lower_band = ma5 - (2 * std5)
+            bb_width = (upper_band - lower_band)/(ma5 + 1e-8)
+            bb_position = (current_close - lower_band)/(upper_band - lower_band + 1e-8)
+            
+            # Relative Strength Index (simplified)
+            gains = np.array([max(0, closes[i] - closes[i+1]) for i in range(4)])
+            losses = np.array([max(0, closes[i+1] - closes[i]) for i in range(4)])
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            rs = avg_gain / (avg_loss + 1e-8)
+            rsi = 100 - (100 / (1 + rs))
+            
+            # Volatility measures
+            price_volatility = std5 / (ma5 + 1e-8)
+            
+            features.extend([
+                price_to_ma5,                  # Price relative to 5-day MA
+                price_to_ma3,                  # Price relative to 3-day MA
+                macd,                          # MACD (simplified)
+                bb_width,                      # Bollinger Band width
+                bb_position,                   # Position within Bollinger Bands
+                rsi,                           # RSI (simplified)
+                price_volatility,              # Price volatility
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0, 0])
+        
+        # Feature set 6: Short interest relative to market indicators
+        # Enhanced from previous iteration with more sophisticated relationships
+        
+        # SI relative to price movement
+        si_to_price_change = short_interest / (np.abs(closes[0] - opens[0]) + 1e-8)
+        
+        # SI relative to volatility
+        if len(closes) >= 5:
+            si_to_volatility = short_interest * price_volatility
+        else:
+            si_to_volatility = 0
+        
+        # SI to volume ratio with time component
+        si_vol_ratio = short_interest / (avg_volume + 1e-8)
+        
+        # SI relative to price levels
+        si_to_price = short_interest / (closes[0] + 1e-8)
+        
+        # SI change relative to price change
+        si_price_change_ratio = 0
+        if t > 0 and len(closes) > 1:
+            prev_si = data[t-1, 0]
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_change = short_interest - prev_si
+            price_change = closes[0] - closes[1]
+            si_price_change_ratio = si_change / (np.abs(price_change) + 1e-8)
+        
+        features.extend([
+            si_to_price_change,               # SI relative to price movement
+            si_to_volatility,                 # SI relative to volatility
+            si_vol_ratio,                     # SI to volume ratio
+            si_to_price,                      # SI relative to price level
+            si_price_change_ratio,            # SI change relative to price change
+        ])
+        
+        # Feature set 7: Pattern recognition features
+        # New in this iteration - looking for specific patterns that might indicate short interest changes
+        
+        # Detect potential short squeeze conditions
+        short_squeeze_indicator = 0
+        if len(closes) >= 5 and avg_volume > 0:
+            # High short interest + price increase + volume increase = potential squeeze
+            price_up = closes[0] > closes[4]
+            si_high = short_interest > 0.1  # Arbitrary threshold
+            vol_increase = False
+            
+            if t > 0:
+                prev_vol = data[t-1, 1]
+                prev_vol = 0 if np.isnan(prev_vol) else prev_vol
+                vol_increase = avg_volume > prev_vol * 1.2  # 20% volume increase
+            
+            short_squeeze_indicator = 1 if (price_up and si_high and vol_increase) else 0
+        
+        # Detect potential short entry conditions
+        short_entry_indicator = 0
+        if len(closes) >= 5:
+            # Price decline + increased volatility = potential short entry
+            price_down = closes[0] < closes[4]
+            high_volatility = bb_width > 0.1  # Arbitrary threshold
+            short_entry_indicator = 1 if (price_down and high_volatility) else 0
+        
+        # Detect divergence between price and short interest
+        divergence_indicator = 0
+        if t > 0:
+            prev_si = data[t-1, 0]
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            
+            if len(closes) > 1:
+                price_up = closes[0] > closes[1]
+                si_up = short_interest > prev_si
+                # Divergence: price up but short interest also up, or price down but short interest down
+                divergence_indicator = 1 if (price_up and si_up) or (not price_up and not si_up) else 0
+        
+        features.extend([
+            short_squeeze_indicator,          # Potential short squeeze condition
+            short_entry_indicator,            # Potential short entry condition
+            divergence_indicator,             # Price-SI divergence indicator
+        ])
+        
+        # Feature set 8: Temporal features
+        # New in this iteration - capturing time-based patterns
+        
+        # Day of the week effect (assuming each timestamp is a trading day)
+        # This is a placeholder - in real implementation, you would use actual dates
+        day_effect = t % 5  # 0-4 representing Monday-Friday
+        day_effect_norm = day_effect / 4.0  # Normalized to [0,1]
+        
+        # Month effect (placeholder)
+        month_effect = (t // 20) % 12  # Crude approximation
+        month_effect_norm = month_effect / 11.0  # Normalized to [0,1]
+        
+        features.extend([
+            day_effect_norm,                  # Day of week effect (normalized)
+            month_effect_norm,                # Month effect (normalized)
+        ])
+        
+        # Feature set 9: Interaction terms
+        # New in this iteration - capturing interactions between important features
+        
+        # Interaction between short interest and volume
+        si_vol_interaction = np.log1p(short_interest) * np.log1p(avg_volume)
+        
+        # Interaction between short interest and price momentum
+        si_momentum_interaction = 0
+        if len(closes) > 1:
+            momentum = closes[0]/closes[1] - 1
+            si_momentum_interaction = short_interest * momentum
+        
+        # Interaction between volume and volatility
+        vol_volatility_interaction = 0
+        if len(closes) >= 5:
+            vol_volatility_interaction = avg_volume * price_volatility
+        
+        features.extend([
+            si_vol_interaction,               # SI-volume interaction
+            si_momentum_interaction,          # SI-momentum interaction
+            vol_volatility_interaction,       # Volume-volatility interaction
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    return result
+============================================================
+
+ITERATION 6:
+Performance: MAPE = 48.27%
+Improvement: -6.28%
+Features: 56
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 50))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Analysis of previous iterations:
+    # - Iteration 5 (MAPE 42.00%) was the best so far with significant improvement
+    # - Feature_21, Feature_33, Feature_9, Feature_13, Feature_8 were most important
+    # - Previous iteration had 29/36 significant features, suggesting good direction
+    # - Will enhance with more sophisticated financial indicators and focus on the most important features
+    # - Will refine technical indicators and add more emphasis on pattern recognition
+    # - Will improve handling of temporal relationships and add more robust normalization
+    # - Will focus on creating more interaction terms between important features
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature set 1: Core features - retain original important features
+        # These have consistently shown importance across iterations
+        features = [
+            short_interest,                    # Original short interest - consistently important
+            avg_volume,                        # Original volume - consistently important
+            short_interest / (avg_volume + 1e-8),  # SI to volume ratio - key relationship
+            np.log1p(short_interest),          # Log-transformed SI for better scaling
+            np.log1p(avg_volume)               # Log-transformed volume for better scaling
+        ]
+        
+        # Feature set 2: Short interest dynamics with enhanced metrics
+        # Improved from previous iteration with more robust calculations and normalization
+        si_history = []
+        for i in range(min(4, t+1)):
+            prev_si = data[t-i, 0] if t-i >= 0 else 0
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_history.append(prev_si)
+            
+        # Short interest change metrics with better normalization
+        if len(si_history) > 1:
+            si_change = si_history[0] - si_history[1]
+            # Use log1p for better handling of percentage changes
+            si_pct_change = np.log1p(si_history[0]) - np.log1p(si_history[1])
+            # Normalize by market cap proxy (price * volume)
+            si_change_norm = si_change / (closes[0] * avg_volume + 1e-8)
+            
+            # Exponentially weighted SI change (more weight to recent changes)
+            if len(si_history) >= 3:
+                weights = np.array([0.6, 0.3, 0.1])[:len(si_history)-1]
+                si_changes = np.diff(si_history[:len(weights)+1][::-1])[::-1]  # Reverse to get most recent first
+                exp_weighted_si_change = np.sum(weights * si_changes) / np.sum(weights)
+            else:
+                exp_weighted_si_change = si_change
+            
+            features.extend([
+                si_change,                     # Absolute change in short interest
+                si_pct_change,                 # Log-normalized percentage change in short interest
+                si_change_norm,                # SI change normalized by market cap proxy
+                exp_weighted_si_change,        # Exponentially weighted SI change
+            ])
+            
+            # Add acceleration metrics if we have enough history
+            if len(si_history) > 2:
+                prev_si_change = si_history[1] - si_history[2]
+                si_acceleration = si_change - prev_si_change
+                si_accel_norm = si_acceleration / (si_history[1] + 1e-8)  # Normalized acceleration
+                
+                # SI momentum (rate of change of rate of change)
+                if len(si_history) > 3:
+                    prev_prev_si_change = si_history[2] - si_history[3]
+                    prev_si_accel = prev_si_change - prev_prev_si_change
+                    si_momentum = si_acceleration - prev_si_accel
+                else:
+                    si_momentum = 0
+                
+                features.extend([
+                    si_acceleration,           # Acceleration of short interest changes
+                    si_accel_norm,             # Normalized acceleration
+                    si_momentum,               # SI momentum (third derivative)
+                ])
+            else:
+                features.extend([0, 0, 0])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0, 0])
+        
+        # Feature set 3: Volume dynamics and relationships
+        # Enhanced from previous iteration with more sophisticated metrics
+        
+        # Volume trend over different time periods
+        vol_history = []
+        for i in range(min(5, t+1)):
+            prev_vol = data[t-i, 1] if t-i >= 0 else avg_volume
+            prev_vol = avg_volume if np.isnan(prev_vol) else prev_vol
+            vol_history.append(prev_vol)
+        
+        if len(vol_history) >= 2:
+            vol_change = vol_history[0] - vol_history[1]
+            vol_pct_change = vol_history[0] / (vol_history[1] + 1e-8) - 1
+            
+            # Volume trend using exponential weighting
+            if len(vol_history) >= 5:
+                weights = np.array([0.4, 0.3, 0.15, 0.1, 0.05])[:len(vol_history)]
+                vol_trend = np.sum(weights * vol_history) / np.sum(weights)
+                vol_trend_ratio = vol_history[0] / (vol_trend + 1e-8)
+                
+                # Volume volatility
+                vol_volatility = np.std(vol_history) / (np.mean(vol_history) + 1e-8)
+                
+                # Volume oscillator (difference between short and long EMA of volume)
+                short_ema = np.sum(np.array([0.6, 0.3, 0.1]) * vol_history[:3]) / 1.0
+                long_ema = np.sum(weights * vol_history) / np.sum(weights)
+                vol_oscillator = short_ema / (long_ema + 1e-8) - 1
+            else:
+                vol_trend = vol_history[0]
+                vol_trend_ratio = 1.0
+                vol_volatility = 0.0
+                vol_oscillator = 0.0
+            
+            features.extend([
+                vol_change,                    # Absolute change in volume
+                vol_pct_change,                # Percentage change in volume
+                vol_trend_ratio,               # Volume relative to trend
+                vol_volatility,                # Volume volatility
+                vol_oscillator,                # Volume oscillator
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0])
+        
+        # Feature set 4: Price dynamics and technical indicators
+        # Significantly enhanced from previous iteration
+        
+        # Basic price metrics
+        if len(closes) > 0:
+            current_close = closes[0]
+            current_open = opens[0]
+            
+            # Daily return and range
+            daily_return = current_close/current_open - 1 if current_open != 0 else 0
+            daily_range = (highs[0] - lows[0])/(current_open + 1e-8)
+            
+            # Price momentum over different timeframes
+            momentum_1d = 0
+            momentum_3d = 0
+            momentum_5d = 0
+            
+            if len(closes) > 1:
+                momentum_1d = current_close/closes[1] - 1
+            
+            if len(closes) >= 3:
+                momentum_3d = current_close/closes[2] - 1
+            
+            if len(closes) >= 5:
+                momentum_5d = current_close/closes[4] - 1
+            
+            # Gap analysis
+            gap = 0
+            if len(closes) > 1:
+                gap = opens[0]/closes[1] - 1
+            
+            features.extend([
+                daily_return,                  # Daily return
+                daily_range,                   # Daily range relative to open
+                momentum_1d,                   # 1-day momentum
+                momentum_3d,                   # 3-day momentum
+                momentum_5d,                   # 5-day momentum
+                gap,                           # Gap between previous close and current open
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0])
+        
+        # Feature set 5: Advanced technical indicators
+        # Significantly expanded from previous iteration
+        
+        if len(closes) >= 5:
+            # Moving averages
+            ma5 = np.mean(closes[:5])
+            ma3 = np.mean(closes[:3]) if len(closes) >= 3 else closes[0]
+            
+            # Exponential moving averages (simplified)
+            weights_3 = np.array([0.6, 0.3, 0.1])
+            weights_5 = np.array([0.4, 0.25, 0.15, 0.12, 0.08])
+            ema3 = np.sum(weights_3 * closes[:3]) / np.sum(weights_3) if len(closes) >= 3 else closes[0]
+            ema5 = np.sum(weights_5 * closes[:5]) / np.sum(weights_5)
+            
+            # Price relative to moving averages
+            price_to_ma5 = current_close/ma5 - 1
+            price_to_ma3 = current_close/ma3 - 1
+            price_to_ema5 = current_close/ema5 - 1
+            
+            # Moving average convergence/divergence
+            macd = ema3 - ema5
+            
+            # Bollinger Bands
+            std5 = np.std(closes[:5])
+            upper_band = ma5 + (2 * std5)
+            lower_band = ma5 - (2 * std5)
+            bb_width = (upper_band - lower_band)/(ma5 + 1e-8)
+            bb_position = (current_close - lower_band)/(upper_band - lower_band + 1e-8)
+            
+            # Relative Strength Index (simplified)
+            gains = np.array([max(0, closes[i] - closes[i+1]) for i in range(4)])
+            losses = np.array([max(0, closes[i+1] - closes[i]) for i in range(4)])
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            rs = avg_gain / (avg_loss + 1e-8)
+            rsi = 100 - (100 / (1 + rs))
+            
+            # Stochastic oscillator
+            lowest_low = np.min(lows[:5])
+            highest_high = np.max(highs[:5])
+            stochastic_k = 100 * (current_close - lowest_low) / (highest_high - lowest_low + 1e-8)
+            
+            # Average True Range (ATR)
+            tr_values = []
+            for i in range(min(5, len(closes)-1)):
+                high_low = highs[i] - lows[i]
+                high_close = abs(highs[i] - closes[i+1])
+                low_close = abs(lows[i] - closes[i+1])
+                tr = max(high_low, high_close, low_close)
+                tr_values.append(tr)
+            atr = np.mean(tr_values) if tr_values else 0
+            
+            # Volatility measures
+            price_volatility = std5 / (ma5 + 1e-8)
+            
+            features.extend([
+                price_to_ma5,                  # Price relative to 5-day MA
+                price_to_ma3,                  # Price relative to 3-day MA
+                price_to_ema5,                 # Price relative to 5-day EMA
+                macd,                          # MACD (simplified)
+                bb_width,                      # Bollinger Band width
+                bb_position,                   # Position within Bollinger Bands
+                rsi,                           # RSI (simplified)
+                stochastic_k,                  # Stochastic oscillator
+                atr / (current_close + 1e-8),  # Normalized ATR
+                price_volatility,              # Price volatility
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        
+        # Feature set 6: Short interest relative to market indicators
+        # Enhanced from previous iteration with more sophisticated relationships
+        
+        # SI relative to price movement
+        si_to_price_change = short_interest / (np.abs(closes[0] - opens[0]) + 1e-8)
+        
+        # SI relative to volatility
+        if len(closes) >= 5:
+            si_to_volatility = short_interest * price_volatility
+        else:
+            si_to_volatility = 0
+        
+        # SI to volume ratio with time component
+        si_vol_ratio = short_interest / (avg_volume + 1e-8)
+        
+        # SI relative to price levels
+        si_to_price = short_interest / (closes[0] + 1e-8)
+        
+        # SI change relative to price change
+        si_price_change_ratio = 0
+        if t > 0 and len(closes) > 1:
+            prev_si = data[t-1, 0]
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_change = short_interest - prev_si
+            price_change = closes[0] - closes[1]
+            si_price_change_ratio = si_change / (np.abs(price_change) + 1e-8)
+        
+        # SI relative to trading range
+        si_to_range = 0
+        if len(closes) >= 5:
+            price_range = np.max(highs[:5]) - np.min(lows[:5])
+            si_to_range = short_interest / (price_range + 1e-8)
+        
+        features.extend([
+            si_to_price_change,               # SI relative to price movement
+            si_to_volatility,                 # SI relative to volatility
+            si_vol_ratio,                     # SI to volume ratio
+            si_to_price,                      # SI relative to price level
+            si_price_change_ratio,            # SI change relative to price change
+            si_to_range,                      # SI relative to trading range
+        ])
+        
+        # Feature set 7: Pattern recognition features
+        # Enhanced from previous iteration with more sophisticated pattern detection
+        
+        # Detect potential short squeeze conditions
+        short_squeeze_indicator = 0
+        if len(closes) >= 5 and avg_volume > 0:
+            # High short interest + price increase + volume increase = potential squeeze
+            price_up = closes[0] > closes[4]
+            si_high = short_interest > 0.1  # Arbitrary threshold
+            vol_increase = False
+            
+            if t > 0:
+                prev_vol = data[t-1, 1]
+                prev_vol = 0 if np.isnan(prev_vol) else prev_vol
+                vol_increase = avg_volume > prev_vol * 1.2  # 20% volume increase
+            
+            # Calculate squeeze intensity
+            squeeze_intensity = 0
+            if price_up and si_high:
+                price_change_pct = closes[0]/closes[4] - 1
+                squeeze_intensity = price_change_pct * short_interest * (avg_volume / (prev_vol + 1e-8))
+            
+            short_squeeze_indicator = squeeze_intensity
+        
+        # Detect potential short entry conditions
+        short_entry_indicator = 0
+        if len(closes) >= 5:
+            # Price decline + increased volatility = potential short entry
+            price_down = closes[0] < closes[4]
+            high_volatility = price_volatility > 0.02  # Arbitrary threshold
+            
+            # Calculate entry signal strength
+            if price_down and high_volatility:
+                price_change_pct = 1 - closes[0]/closes[4]
+                short_entry_indicator = price_change_pct * price_volatility
+        
+        # Detect divergence between price and short interest
+        divergence_indicator = 0
+        if t > 0:
+            prev_si = data[t-1, 0]
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            
+            if len(closes) > 1:
+                price_up = closes[0] > closes[1]
+                si_up = short_interest > prev_si
+                
+                # Calculate divergence strength
+                if (price_up and si_up) or (not price_up and not si_up):
+                    price_change_pct = abs(closes[0]/closes[1] - 1)
+                    si_change_pct = abs(short_interest/(prev_si + 1e-8) - 1)
+                    divergence_indicator = price_change_pct * si_change_pct
+        
+        # Detect reversal patterns
+        reversal_indicator = 0
+        if len(closes) >= 3:
+            # Simple reversal: down-down-up or up-up-down
+            down_down_up = closes[2] > closes[1] and closes[1] > closes[0] and closes[0] < opens[0]
+            up_up_down = closes[2] < closes[1] and closes[1] < closes[0] and closes[0] > opens[0]
+            
+            if down_down_up or up_up_down:
+                reversal_indicator = abs(closes[0]/closes[2] - 1)
+        
+        features.extend([
+            short_squeeze_indicator,          # Potential short squeeze condition
+            short_entry_indicator,            # Potential short entry condition
+            divergence_indicator,             # Price-SI divergence indicator
+            reversal_indicator,               # Price reversal pattern indicator
+        ])
+        
+        # Feature set 8: Interaction terms
+        # Enhanced from previous iteration with more sophisticated interactions
+        
+        # Interaction between short interest and volume
+        si_vol_interaction = np.log1p(short_interest) * np.log1p(avg_volume)
+        
+        # Interaction between short interest and price momentum
+        si_momentum_interaction = 0
+        if len(closes) > 1:
+            momentum = closes[0]/closes[1] - 1
+            si_momentum_interaction = short_interest * momentum
+        
+        # Interaction between volume and volatility
+        vol_volatility_interaction = 0
+        if len(closes) >= 5:
+            vol_volatility_interaction = avg_volume * price_volatility
+        
+        # Interaction between short interest and RSI
+        si_rsi_interaction = 0
+        if len(closes) >= 5:
+            si_rsi_interaction = short_interest * (rsi/100)
+        
+        # Interaction between short interest change and volume change
+        si_vol_change_interaction = 0
+        if t > 0 and len(vol_history) >= 2:
+            prev_si = data[t-1, 0]
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_change = short_interest - prev_si
+            vol_change = vol_history[0] - vol_history[1]
+            si_vol_change_interaction = si_change * vol_change
+        
+        # Interaction between short interest and Bollinger Band position
+        si_bb_interaction = 0
+        if len(closes) >= 5:
+            si_bb_interaction = short_interest * bb_position
+        
+        features.extend([
+            si_vol_interaction,               # SI-volume interaction
+            si_momentum_interaction,          # SI-momentum interaction
+            vol_volatility_interaction,       # Volume-volatility interaction
+            si_rsi_interaction,               # SI-RSI interaction
+            si_vol_change_interaction,        # SI change-volume change interaction
+            si_bb_interaction,                # SI-Bollinger Band position interaction
+        ])
+        
+        # Feature set 9: Nonlinear transformations of important features
+        # New in this iteration - capturing nonlinear relationships
+        
+        # Squared and square root transformations of short interest
+        si_squared = short_interest ** 2
+        si_sqrt = np.sqrt(max(0, short_interest))
+        
+        # Squared and square root transformations of volume
+        vol_squared = avg_volume ** 2
+        vol_sqrt = np.sqrt(max(0, avg_volume))
+        
+        # Squared transformation of SI/volume ratio
+        si_vol_ratio_squared = si_vol_ratio ** 2
+        
+        # Exponential decay of short interest
+        si_exp_decay = np.exp(-max(0, short_interest))
+        
+        # Sigmoid transformation of short interest
+        si_sigmoid = 1 / (1 + np.exp(-short_interest))
+        
+        features.extend([
+            si_squared,                       # Squared SI
+            si_sqrt,                          # Square root of SI
+            vol_squared,                      # Squared volume
+            vol_sqrt,                         # Square root of volume
+            si_vol_ratio_squared,             # Squared SI/volume ratio
+            si_exp_decay,                     # Exponential decay of SI
+            si_sigmoid,                       # Sigmoid transformation of SI
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    return result
+============================================================
+
+ITERATION 7:
+Performance: MAPE = 42.54%
+Improvement: -0.54%
+Features: 44
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 45))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Analysis of previous iterations:
+    # - Iteration 5 (MAPE 42.00%) was the best model, while Iteration 6 (MAPE 48.27%) regressed
+    # - Top features from best model (Iteration 5): Feature_21, Feature_33, Feature_9, Feature_13, Feature_8
+    # - Iteration 6 added too many features (56) with only 33 being significant
+    # - Will focus on fewer, higher-quality features with stronger financial relevance
+    # - Will emphasize the most important features from Iteration 5
+    # - Will improve normalization techniques and reduce feature collinearity
+    # - Will focus on more robust technical indicators and their relationships with short interest
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature set 1: Core features - retain original important features
+        # These were consistently important across iterations
+        features = [
+            short_interest,                    # Original short interest
+            avg_volume,                        # Original volume
+            short_interest / (avg_volume + 1e-8)  # SI to volume ratio - key relationship
+        ]
+        
+        # Feature set 2: Short interest dynamics
+        # Focusing on robust SI change metrics that were important in Iteration 5
+        si_history = []
+        for i in range(min(4, t+1)):
+            prev_si = data[t-i, 0] if t-i >= 0 else 0
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_history.append(prev_si)
+            
+        # Short interest change metrics with robust normalization
+        if len(si_history) > 1:
+            si_change = si_history[0] - si_history[1]
+            si_pct_change = si_change / (si_history[1] + 1e-8)
+            
+            # Log-transformed SI change for better scaling
+            log_si_change = np.log1p(si_history[0]) - np.log1p(si_history[1])
+            
+            # SI change normalized by price and volume
+            si_change_norm = si_change / (closes[0] * avg_volume + 1e-8)
+            
+            features.extend([
+                si_change,                     # Absolute change in short interest
+                si_pct_change,                 # Percentage change in short interest
+                log_si_change,                 # Log-transformed SI change
+                si_change_norm,                # SI change normalized by market cap proxy
+            ])
+            
+            # Add acceleration metrics if we have enough history
+            if len(si_history) > 2:
+                prev_si_change = si_history[1] - si_history[2]
+                si_acceleration = si_change - prev_si_change
+                si_accel_norm = si_acceleration / (si_history[1] + 1e-8)
+                
+                features.extend([
+                    si_acceleration,           # Acceleration of short interest changes
+                    si_accel_norm,             # Normalized acceleration
+                ])
+            else:
+                features.extend([0, 0])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0])
+        
+        # Feature set 3: Volume dynamics
+        # Focusing on volume metrics that were important in Iteration 5
+        
+        # Volume trend over different time periods
+        vol_history = []
+        for i in range(min(5, t+1)):
+            prev_vol = data[t-i, 1] if t-i >= 0 else avg_volume
+            prev_vol = avg_volume if np.isnan(prev_vol) else prev_vol
+            vol_history.append(prev_vol)
+        
+        if len(vol_history) >= 2:
+            vol_change = vol_history[0] - vol_history[1]
+            vol_pct_change = vol_history[0] / (vol_history[1] + 1e-8) - 1
+            
+            # Volume trend using exponential weighting
+            if len(vol_history) >= 3:
+                weights = np.array([0.6, 0.3, 0.1])[:len(vol_history)]
+                vol_trend = np.sum(weights * vol_history[:len(weights)]) / np.sum(weights)
+                vol_trend_ratio = vol_history[0] / (vol_trend + 1e-8)
+                
+                # Volume volatility (coefficient of variation)
+                vol_volatility = np.std(vol_history[:3]) / (np.mean(vol_history[:3]) + 1e-8)
+            else:
+                vol_trend = vol_history[0]
+                vol_trend_ratio = 1.0
+                vol_volatility = 0.0
+            
+            features.extend([
+                vol_change,                    # Absolute change in volume
+                vol_pct_change,                # Percentage change in volume
+                vol_trend_ratio,               # Volume relative to trend
+                vol_volatility,                # Volume volatility
+            ])
+        else:
+            features.extend([0, 0, 0, 0])
+        
+        # Feature set 4: Price dynamics and technical indicators
+        # Focusing on price metrics that were important in Iteration 5
+        
+        # Basic price metrics
+        if len(closes) > 0:
+            current_close = closes[0]
+            current_open = opens[0]
+            
+            # Daily return and range
+            daily_return = current_close/current_open - 1 if current_open != 0 else 0
+            daily_range = (highs[0] - lows[0])/(current_open + 1e-8)
+            
+            # Price momentum over different timeframes
+            momentum_1d = 0
+            momentum_3d = 0
+            
+            if len(closes) > 1:
+                momentum_1d = current_close/closes[1] - 1
+            
+            if len(closes) >= 3:
+                momentum_3d = current_close/closes[2] - 1
+            
+            features.extend([
+                daily_return,                  # Daily return
+                daily_range,                   # Daily range relative to open
+                momentum_1d,                   # 1-day momentum
+                momentum_3d,                   # 3-day momentum
+            ])
+        else:
+            features.extend([0, 0, 0, 0])
+        
+        # Feature set 5: Advanced technical indicators
+        # Focusing on technical indicators that were important in Iteration 5
+        
+        if len(closes) >= 5:
+            # Moving averages
+            ma5 = np.mean(closes[:5])
+            ma3 = np.mean(closes[:3]) if len(closes) >= 3 else closes[0]
+            
+            # Exponential moving averages (simplified)
+            weights_3 = np.array([0.6, 0.3, 0.1])
+            weights_5 = np.array([0.4, 0.25, 0.15, 0.12, 0.08])
+            ema3 = np.sum(weights_3 * closes[:3]) / np.sum(weights_3) if len(closes) >= 3 else closes[0]
+            ema5 = np.sum(weights_5 * closes[:5]) / np.sum(weights_5)
+            
+            # Price relative to moving averages
+            price_to_ma5 = current_close/ma5 - 1
+            price_to_ema5 = current_close/ema5 - 1
+            
+            # Moving average convergence/divergence
+            macd = ema3 - ema5
+            
+            # Bollinger Bands
+            std5 = np.std(closes[:5])
+            upper_band = ma5 + (2 * std5)
+            lower_band = ma5 - (2 * std5)
+            bb_width = (upper_band - lower_band)/(ma5 + 1e-8)
+            bb_position = (current_close - lower_band)/(upper_band - lower_band + 1e-8)
+            
+            # Relative Strength Index (simplified)
+            gains = np.array([max(0, closes[i] - closes[i+1]) for i in range(4)])
+            losses = np.array([max(0, closes[i+1] - closes[i]) for i in range(4)])
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            rs = avg_gain / (avg_loss + 1e-8)
+            rsi = 100 - (100 / (1 + rs))
+            
+            # Average True Range (ATR)
+            tr_values = []
+            for i in range(min(5, len(closes)-1)):
+                high_low = highs[i] - lows[i]
+                high_close = abs(highs[i] - closes[i+1])
+                low_close = abs(lows[i] - closes[i+1])
+                tr = max(high_low, high_close, low_close)
+                tr_values.append(tr)
+            atr = np.mean(tr_values) if tr_values else 0
+            
+            # Volatility measures
+            price_volatility = std5 / (ma5 + 1e-8)
+            
+            features.extend([
+                price_to_ma5,                  # Price relative to 5-day MA
+                price_to_ema5,                 # Price relative to 5-day EMA
+                macd,                          # MACD (simplified)
+                bb_width,                      # Bollinger Band width
+                bb_position,                   # Position within Bollinger Bands
+                rsi,                           # RSI (simplified)
+                atr / (current_close + 1e-8),  # Normalized ATR
+                price_volatility,              # Price volatility
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0, 0, 0])
+        
+        # Feature set 6: Short interest relative to market indicators
+        # These relationships were important in Iteration 5
+        
+        # SI relative to price movement
+        si_to_price_change = short_interest / (np.abs(closes[0] - opens[0]) + 1e-8)
+        
+        # SI relative to volatility
+        if len(closes) >= 5:
+            si_to_volatility = short_interest * price_volatility
+        else:
+            si_to_volatility = 0
+        
+        # SI to volume ratio with time component
+        si_vol_ratio = short_interest / (avg_volume + 1e-8)
+        
+        # SI relative to price levels
+        si_to_price = short_interest / (closes[0] + 1e-8)
+        
+        # SI change relative to price change
+        si_price_change_ratio = 0
+        if t > 0 and len(closes) > 1:
+            prev_si = data[t-1, 0]
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_change = short_interest - prev_si
+            price_change = closes[0] - closes[1]
+            si_price_change_ratio = si_change / (np.abs(price_change) + 1e-8)
+        
+        features.extend([
+            si_to_price_change,               # SI relative to price movement
+            si_to_volatility,                 # SI relative to volatility
+            si_vol_ratio,                     # SI to volume ratio
+            si_to_price,                      # SI relative to price level
+            si_price_change_ratio,            # SI change relative to price change
+        ])
+        
+        # Feature set 7: Pattern recognition features
+        # Focusing on patterns that were important in Iteration 5
+        
+        # Detect potential short squeeze conditions
+        short_squeeze_indicator = 0
+        if len(closes) >= 5 and avg_volume > 0:
+            # High short interest + price increase + volume increase = potential squeeze
+            price_up = closes[0] > closes[4]
+            si_high = short_interest > 0.1  # Arbitrary threshold
+            vol_increase = False
+            
+            if t > 0:
+                prev_vol = data[t-1, 1]
+                prev_vol = 0 if np.isnan(prev_vol) else prev_vol
+                vol_increase = avg_volume > prev_vol * 1.2  # 20% volume increase
+            
+            # Calculate squeeze intensity
+            if price_up and si_high:
+                price_change_pct = closes[0]/closes[4] - 1
+                short_squeeze_indicator = price_change_pct * short_interest
+        
+        # Detect divergence between price and short interest
+        divergence_indicator = 0
+        if t > 0:
+            prev_si = data[t-1, 0]
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            
+            if len(closes) > 1:
+                price_up = closes[0] > closes[1]
+                si_up = short_interest > prev_si
+                
+                # Divergence occurs when price and SI move in opposite directions
+                if (price_up and not si_up) or (not price_up and si_up):
+                    price_change_pct = abs(closes[0]/closes[1] - 1)
+                    si_change_pct = abs(short_interest/(prev_si + 1e-8) - 1)
+                    divergence_indicator = price_change_pct * si_change_pct
+        
+        features.extend([
+            short_squeeze_indicator,          # Potential short squeeze condition
+            divergence_indicator,             # Price-SI divergence indicator
+        ])
+        
+        # Feature set 8: Interaction terms
+        # Focusing on interactions that were important in Iteration 5
+        
+        # Interaction between short interest and volume
+        si_vol_interaction = np.log1p(short_interest) * np.log1p(avg_volume)
+        
+        # Interaction between short interest and price momentum
+        si_momentum_interaction = 0
+        if len(closes) > 1:
+            momentum = closes[0]/closes[1] - 1
+            si_momentum_interaction = short_interest * momentum
+        
+        # Interaction between short interest and RSI
+        si_rsi_interaction = 0
+        if len(closes) >= 5:
+            si_rsi_interaction = short_interest * (rsi/100)
+        
+        # Interaction between short interest and Bollinger Band position
+        si_bb_interaction = 0
+        if len(closes) >= 5:
+            si_bb_interaction = short_interest * bb_position
+        
+        features.extend([
+            si_vol_interaction,               # SI-volume interaction
+            si_momentum_interaction,          # SI-momentum interaction
+            si_rsi_interaction,               # SI-RSI interaction
+            si_bb_interaction,                # SI-Bollinger Band position interaction
+        ])
+        
+        # Feature set 9: Nonlinear transformations of important features
+        # Focusing on transformations that capture nonlinear relationships
+        
+        # Log transformations of key metrics
+        log_si = np.log1p(short_interest)
+        log_vol = np.log1p(avg_volume)
+        
+        # Ratio transformations
+        si_vol_ratio_log = log_si - log_vol
+        
+        # Squared transformations of key metrics
+        si_squared = short_interest ** 2
+        
+        # Square root transformations
+        si_sqrt = np.sqrt(max(0, short_interest))
+        
+        features.extend([
+            log_si,                           # Log-transformed SI
+            log_vol,                          # Log-transformed volume
+            si_vol_ratio_log,                 # Log ratio of SI to volume
+            si_squared,                       # Squared SI
+            si_sqrt,                          # Square root of SI
+        ])
+        
+        # Feature set 10: Time-based features
+        # New in this iteration - capturing temporal patterns
+        
+        # SI change velocity (rate of change of SI)
+        si_velocity = 0
+        if len(si_history) >= 3:
+            # First derivative approximation
+            si_velocity = (si_history[0] - si_history[2]) / 2
+        
+        # SI change acceleration (second derivative of SI)
+        si_acceleration_2 = 0
+        if len(si_history) >= 3:
+            # Second derivative approximation
+            si_acceleration_2 = si_history[0] - 2*si_history[1] + si_history[2]
+        
+        # Exponentially weighted SI
+        exp_weighted_si = 0
+        if len(si_history) >= 3:
+            weights = np.array([0.6, 0.3, 0.1])
+            exp_weighted_si = np.sum(weights * si_history[:3]) / np.sum(weights)
+        
+        features.extend([
+            si_velocity,                      # SI change velocity
+            si_acceleration_2,                # SI change acceleration (alternative calculation)
+            exp_weighted_si,                  # Exponentially weighted SI
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    return result
+============================================================
+
+ITERATION 8:
+Performance: MAPE = 54.38%
+Improvement: -12.39%
+Features: 40
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 40))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Analysis of previous iterations:
+    # - Iteration 5 (MAPE 42.00%) was the best model, with Feature_21, Feature_33, Feature_9, Feature_13, Feature_8 being most important
+    # - Iteration 7 (MAPE 42.54%) was slightly worse despite having more features
+    # - Key insights:
+    #   1. Too many features can lead to overfitting (Iteration 6 had 56 features and performed poorly)
+    #   2. Need to focus on the most predictive features from Iteration 5
+    #   3. Need better normalization and scaling of features
+    #   4. Need to reduce multicollinearity between features
+    #   5. Need to focus on financial domain knowledge and relationships between SI, volume, and price
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature Group 1: Core SI and Volume Features
+        # These were consistently important across iterations
+        features = [
+            short_interest,                                # Original short interest
+            avg_volume,                                    # Original volume
+            short_interest / (avg_volume + 1e-8),          # SI to volume ratio (key relationship)
+            np.log1p(short_interest),                      # Log-transformed SI (for better scaling)
+            np.log1p(avg_volume),                          # Log-transformed volume
+            np.log1p(short_interest) - np.log1p(avg_volume) # Log ratio (better scaling than direct ratio)
+        ]
+        
+        # Feature Group 2: SI History and Dynamics
+        # Extract SI history for temporal analysis
+        si_history = []
+        for i in range(min(4, t+1)):
+            prev_si = data[t-i, 0] if t-i >= 0 else 0
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_history.append(prev_si)
+        
+        # Fill history if needed
+        while len(si_history) < 4:
+            si_history.append(0)
+        
+        # SI change metrics (focus on robust calculations)
+        si_change = si_history[0] - si_history[1] if len(si_history) > 1 else 0
+        si_pct_change = si_change / (si_history[1] + 1e-8) if len(si_history) > 1 else 0
+        
+        # SI momentum (rate of change over different time periods)
+        si_momentum_2d = (si_history[0] - si_history[2]) / 2 if len(si_history) > 2 else 0
+        si_momentum_3d = (si_history[0] - si_history[3]) / 3 if len(si_history) > 3 else 0
+        
+        # SI acceleration (second derivative)
+        si_accel = (si_history[0] - 2*si_history[1] + si_history[2]) if len(si_history) > 2 else 0
+        
+        # Exponentially weighted SI (gives more weight to recent values)
+        if len(si_history) >= 3:
+            weights = np.array([0.65, 0.25, 0.1])
+            ema_si = np.sum(weights * si_history[:3]) / np.sum(weights)
+            # SI deviation from trend
+            si_trend_deviation = si_history[0] / (ema_si + 1e-8) - 1
+        else:
+            ema_si = si_history[0]
+            si_trend_deviation = 0
+        
+        features.extend([
+            si_change,                # Absolute change in SI
+            si_pct_change,            # Percentage change in SI
+            si_momentum_2d,           # 2-day SI momentum
+            si_momentum_3d,           # 3-day SI momentum
+            si_accel,                 # SI acceleration
+            ema_si,                   # Exponentially weighted SI
+            si_trend_deviation        # SI deviation from trend
+        ])
+        
+        # Feature Group 3: Price Dynamics
+        # These features capture price movements that might influence short interest
+        
+        # Basic price metrics
+        if len(closes) > 0:
+            current_close = closes[0]
+            current_open = opens[0]
+            
+            # Price returns over different timeframes
+            daily_return = current_close/current_open - 1 if current_open != 0 else 0
+            
+            returns_1d = current_close/closes[1] - 1 if len(closes) > 1 else 0
+            returns_3d = current_close/closes[3] - 1 if len(closes) > 3 else 0
+            returns_5d = current_close/closes[5] - 1 if len(closes) > 5 else 0
+            
+            # Price volatility measures
+            if len(closes) >= 5:
+                price_std = np.std(closes[:5])
+                price_volatility = price_std / (np.mean(closes[:5]) + 1e-8)
+                
+                # High-Low range volatility
+                hl_ranges = [(highs[i] - lows[i])/(opens[i] + 1e-8) for i in range(5)]
+                hl_volatility = np.std(hl_ranges)
+            else:
+                price_volatility = 0
+                hl_volatility = 0
+            
+            # Moving averages
+            ma5 = np.mean(closes[:5]) if len(closes) >= 5 else current_close
+            ma10 = np.mean(closes[:10]) if len(closes) >= 10 else current_close
+            
+            # Price relative to moving averages
+            price_to_ma5 = current_close/ma5 - 1
+            price_to_ma10 = current_close/ma10 - 1
+            
+            # Moving average crossover
+            ma_crossover = ma5/ma10 - 1
+            
+            features.extend([
+                daily_return,         # Daily return
+                returns_1d,           # 1-day return
+                returns_3d,           # 3-day return
+                returns_5d,           # 5-day return
+                price_volatility,     # Price volatility
+                hl_volatility,        # High-Low range volatility
+                price_to_ma5,         # Price relative to 5-day MA
+                price_to_ma10,        # Price relative to 10-day MA
+                ma_crossover          # MA crossover signal
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0, 0, 0, 0])
+        
+        # Feature Group 4: Volume Dynamics
+        # Volume patterns are critical for short interest prediction
+        
+        # Extract volume history
+        vol_history = []
+        for i in range(min(4, t+1)):
+            prev_vol = data[t-i, 1] if t-i >= 0 else avg_volume
+            prev_vol = avg_volume if np.isnan(prev_vol) else prev_vol
+            vol_history.append(prev_vol)
+        
+        # Fill history if needed
+        while len(vol_history) < 4:
+            vol_history.append(avg_volume)
+        
+        # Volume change metrics
+        vol_change = vol_history[0] - vol_history[1]
+        vol_pct_change = vol_history[0] / (vol_history[1] + 1e-8) - 1
+        
+        # Volume trend
+        if len(vol_history) >= 3:
+            weights = np.array([0.6, 0.3, 0.1])
+            vol_trend = np.sum(weights * vol_history[:3]) / np.sum(weights)
+            vol_trend_ratio = vol_history[0] / (vol_trend + 1e-8)
+        else:
+            vol_trend_ratio = 1.0
+        
+        # Volume volatility
+        vol_volatility = np.std(vol_history) / (np.mean(vol_history) + 1e-8) if len(vol_history) > 1 else 0
+        
+        features.extend([
+            vol_change,               # Absolute change in volume
+            vol_pct_change,           # Percentage change in volume
+            vol_trend_ratio,          # Volume relative to trend
+            vol_volatility            # Volume volatility
+        ])
+        
+        # Feature Group 5: SI-Price-Volume Relationships
+        # These interaction features capture complex relationships between SI, price, and volume
+        
+        # SI relative to price
+        si_to_price = short_interest / (closes[0] + 1e-8) if len(closes) > 0 else 0
+        
+        # SI change relative to price change
+        si_price_change_ratio = 0
+        if len(closes) > 1 and len(si_history) > 1:
+            price_change = closes[0] - closes[1]
+            si_price_change_ratio = si_change / (np.abs(price_change) + 1e-8)
+        
+        # SI relative to price volatility
+        si_vol_interaction = short_interest * price_volatility if len(closes) >= 5 else 0
+        
+        # SI-momentum interaction
+        si_momentum_interaction = short_interest * returns_3d if len(closes) > 3 else 0
+        
+        # Days to cover (important metric for short squeeze potential)
+        days_to_cover = short_interest / (avg_volume + 1e-8)
+        
+        # Short squeeze potential indicator
+        short_squeeze_indicator = 0
+        if len(closes) >= 5 and short_interest > 0:
+            # High SI + price increase + volume increase = potential squeeze
+            price_up = returns_5d > 0.05  # 5% price increase
+            si_high = days_to_cover > 3   # More than 3 days to cover
+            vol_increase = vol_pct_change > 0.2  # 20% volume increase
+            
+            if price_up and si_high and vol_increase:
+                # Squeeze intensity proportional to price change, SI level, and volume increase
+                short_squeeze_indicator = returns_5d * days_to_cover * vol_pct_change
+        
+        features.extend([
+            si_to_price,              # SI relative to price
+            si_price_change_ratio,    # SI change relative to price change
+            si_vol_interaction,       # SI-volatility interaction
+            si_momentum_interaction,  # SI-momentum interaction
+            days_to_cover,            # Days to cover
+            short_squeeze_indicator   # Short squeeze potential
+        ])
+        
+        # Feature Group 6: Technical Indicators
+        # These indicators were important in previous iterations
+        
+        if len(closes) >= 14:
+            # RSI calculation (14-day)
+            gains = np.array([max(0, closes[i] - closes[i+1]) for i in range(13)])
+            losses = np.array([max(0, closes[i+1] - closes[i]) for i in range(13)])
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            rs = avg_gain / (avg_loss + 1e-8)
+            rsi = 100 - (100 / (1 + rs))
+            
+            # Bollinger Bands (20-day)
+            ma20 = np.mean(closes[:14])
+            std20 = np.std(closes[:14])
+            upper_band = ma20 + (2 * std20)
+            lower_band = ma20 - (2 * std20)
+            bb_width = (upper_band - lower_band)/(ma20 + 1e-8)
+            bb_position = (closes[0] - lower_band)/(upper_band - lower_band + 1e-8)
+            
+            # MACD (12-26-9)
+            # Simplified calculation using different weights
+            weights_12 = np.array([0.15, 0.12, 0.1, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01, 0.01])[:min(12, len(closes))]
+            weights_26 = np.array([0.08, 0.07, 0.07, 0.06, 0.06, 0.05, 0.05, 0.04, 0.04, 0.03, 0.03, 0.02, 0.02, 0.01, 0.01] * 2)[:min(26, len(closes))]
+            
+            ema12 = np.sum(weights_12 * closes[:len(weights_12)]) / np.sum(weights_12)
+            ema26 = np.sum(weights_26 * closes[:len(weights_26)]) / np.sum(weights_26)
+            macd = ema12 - ema26
+            
+            features.extend([
+                rsi / 100,            # RSI (normalized to 0-1)
+                bb_width,             # Bollinger Band width
+                bb_position,          # Position within Bollinger Bands
+                macd / (closes[0] + 1e-8)  # MACD normalized by price
+            ])
+        else:
+            features.extend([0.5, 0, 0.5, 0])  # Default values for technical indicators
+        
+        # Feature Group 7: SI-Technical Indicator Interactions
+        # These capture how SI relates to technical conditions
+        
+        # SI-RSI interaction (important for detecting potential reversals)
+        si_rsi_interaction = short_interest * (rsi/100) if len(closes) >= 14 else 0
+        
+        # SI-Bollinger Band interaction (important for detecting potential breakouts)
+        si_bb_interaction = short_interest * bb_position if len(closes) >= 14 else 0
+        
+        # SI-MACD interaction (important for detecting trend changes)
+        si_macd_interaction = short_interest * (macd / (closes[0] + 1e-8)) if len(closes) >= 14 else 0
+        
+        # SI relative to technical condition (composite score)
+        if len(closes) >= 14:
+            # Technical condition score (-1 to 1, negative = bearish, positive = bullish)
+            tech_score = ((rsi/100 - 0.5) + bb_position - 0.5 + (macd / (closes[0] + 1e-8) * 10)) / 3
+            si_tech_interaction = short_interest * tech_score
+        else:
+            si_tech_interaction = 0
+        
+        features.extend([
+            si_rsi_interaction,       # SI-RSI interaction
+            si_bb_interaction,        # SI-Bollinger Band interaction
+            si_macd_interaction,      # SI-MACD interaction
+            si_tech_interaction       # SI-Technical condition interaction
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    return result
+============================================================
+
+ITERATION 9:
+Performance: MAPE = 42.35%
+Improvement: -0.35%
+Features: 32
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 35))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Analysis of previous iterations:
+    # - Iteration 5 (MAPE 42.00%) was the best model with fewer features
+    # - Iteration 8 (MAPE 54.38%) had too many features (40) and likely overfit
+    # - Key insights:
+    #   1. Need to focus on the most important features from best model (Feature_21, Feature_33, Feature_9, Feature_13, Feature_8)
+    #   2. Reduce feature count to avoid overfitting (target ~30-35 features)
+    #   3. Improve normalization and scaling
+    #   4. Focus on financial domain knowledge and SI-volume-price relationships
+    #   5. Reduce multicollinearity between features
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature Group 1: Core SI and Volume Features
+        # These were consistently important across iterations
+        features = [
+            short_interest,                                # Original short interest (consistently important)
+            avg_volume,                                    # Original volume
+            np.log1p(short_interest),                      # Log-transformed SI (for better scaling)
+            np.log1p(avg_volume),                          # Log-transformed volume
+            short_interest / (avg_volume + 1e-8),          # Days to cover (key metric for short squeeze potential)
+        ]
+        
+        # Feature Group 2: SI History and Dynamics
+        # Extract SI history for temporal analysis
+        si_history = []
+        for i in range(min(4, t+1)):
+            prev_si = data[t-i, 0] if t-i >= 0 else 0
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_history.append(prev_si)
+        
+        # Fill history if needed
+        while len(si_history) < 4:
+            si_history.append(0)
+        
+        # SI change metrics (focus on robust calculations)
+        si_change = si_history[0] - si_history[1] if len(si_history) > 1 else 0
+        si_pct_change = si_change / (si_history[1] + 1e-8) if len(si_history) > 1 else 0
+        
+        # SI momentum (rate of change over different time periods)
+        si_momentum_2d = (si_history[0] - si_history[2]) / 2 if len(si_history) > 2 else 0
+        
+        # Exponentially weighted SI (gives more weight to recent values)
+        if len(si_history) >= 3:
+            weights = np.array([0.7, 0.2, 0.1])
+            ema_si = np.sum(weights * si_history[:3]) / np.sum(weights)
+            # SI deviation from trend
+            si_trend_deviation = si_history[0] / (ema_si + 1e-8) - 1
+        else:
+            ema_si = si_history[0]
+            si_trend_deviation = 0
+        
+        features.extend([
+            si_change,                # Absolute change in SI
+            si_pct_change,            # Percentage change in SI
+            si_momentum_2d,           # 2-day SI momentum
+            si_trend_deviation        # SI deviation from trend
+        ])
+        
+        # Feature Group 3: Price Dynamics
+        # These features capture price movements that might influence short interest
+        
+        # Basic price metrics
+        if len(closes) > 0:
+            current_close = closes[0]
+            current_open = opens[0]
+            
+            # Price returns over different timeframes
+            daily_return = (current_close/current_open - 1) if current_open != 0 else 0
+            
+            returns_1d = (current_close/closes[1] - 1) if len(closes) > 1 else 0
+            returns_3d = (current_close/closes[3] - 1) if len(closes) > 3 else 0
+            returns_5d = (current_close/closes[5] - 1) if len(closes) > 5 else 0
+            
+            # Price volatility measures
+            if len(closes) >= 5:
+                price_std = np.std(closes[:5])
+                price_volatility = price_std / (np.mean(closes[:5]) + 1e-8)
+                
+                # High-Low range volatility
+                hl_ranges = [(highs[i] - lows[i])/(opens[i] + 1e-8) for i in range(5)]
+                hl_volatility = np.mean(hl_ranges)  # Average daily range
+            else:
+                price_volatility = 0
+                hl_volatility = 0
+            
+            # Moving averages
+            ma5 = np.mean(closes[:5]) if len(closes) >= 5 else current_close
+            ma10 = np.mean(closes[:10]) if len(closes) >= 10 else current_close
+            
+            # Price relative to moving averages
+            price_to_ma5 = current_close/ma5 - 1
+            price_to_ma10 = current_close/ma10 - 1
+            
+            features.extend([
+                daily_return,         # Daily return
+                returns_3d,           # 3-day return
+                returns_5d,           # 5-day return
+                price_volatility,     # Price volatility
+                hl_volatility,        # High-Low range volatility
+                price_to_ma5,         # Price relative to 5-day MA
+                price_to_ma10,        # Price relative to 10-day MA
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0, 0])
+        
+        # Feature Group 4: Volume Dynamics
+        # Volume patterns are critical for short interest prediction
+        
+        # Extract volume history
+        vol_history = []
+        for i in range(min(4, t+1)):
+            prev_vol = data[t-i, 1] if t-i >= 0 else avg_volume
+            prev_vol = avg_volume if np.isnan(prev_vol) else prev_vol
+            vol_history.append(prev_vol)
+        
+        # Fill history if needed
+        while len(vol_history) < 4:
+            vol_history.append(avg_volume)
+        
+        # Volume change metrics
+        vol_pct_change = vol_history[0] / (vol_history[1] + 1e-8) - 1
+        
+        # Volume trend
+        if len(vol_history) >= 3:
+            weights = np.array([0.6, 0.3, 0.1])
+            vol_trend = np.sum(weights * vol_history[:3]) / np.sum(weights)
+            vol_trend_ratio = vol_history[0] / (vol_trend + 1e-8)
+        else:
+            vol_trend_ratio = 1.0
+        
+        # Volume volatility
+        vol_volatility = np.std(vol_history) / (np.mean(vol_history) + 1e-8) if len(vol_history) > 1 else 0
+        
+        features.extend([
+            vol_pct_change,           # Percentage change in volume
+            vol_trend_ratio,          # Volume relative to trend
+            vol_volatility            # Volume volatility
+        ])
+        
+        # Feature Group 5: SI-Price-Volume Relationships
+        # These interaction features capture complex relationships between SI, price, and volume
+        
+        # SI relative to price
+        si_to_price = short_interest / (closes[0] + 1e-8) if len(closes) > 0 else 0
+        
+        # SI change relative to price change
+        si_price_change_ratio = 0
+        if len(closes) > 1 and len(si_history) > 1:
+            price_change = closes[0] - closes[1]
+            si_price_change_ratio = si_change / (np.abs(price_change) + 1e-8)
+        
+        # SI relative to price volatility
+        si_vol_interaction = short_interest * price_volatility if len(closes) >= 5 else 0
+        
+        # Short squeeze potential indicator (refined from previous iteration)
+        short_squeeze_indicator = 0
+        if len(closes) >= 5 and short_interest > 0:
+            # Refined short squeeze indicator based on SI, price momentum, and volume
+            days_to_cover = short_interest / (avg_volume + 1e-8)
+            price_momentum = returns_5d
+            vol_surge = vol_pct_change
+            
+            # Weighted combination of factors
+            short_squeeze_indicator = (
+                0.4 * np.tanh(days_to_cover / 5) +  # Normalized days to cover
+                0.4 * np.tanh(price_momentum * 10) +  # Normalized price momentum
+                0.2 * np.tanh(vol_surge * 5)  # Normalized volume surge
+            )
+        
+        features.extend([
+            si_to_price,              # SI relative to price
+            si_price_change_ratio,    # SI change relative to price change
+            si_vol_interaction,       # SI-volatility interaction
+            short_squeeze_indicator   # Short squeeze potential
+        ])
+        
+        # Feature Group 6: Technical Indicators
+        # These indicators were important in previous iterations
+        
+        if len(closes) >= 14:
+            # RSI calculation (14-day)
+            diff = np.diff(np.concatenate(([closes[0]], closes[:13])))
+            gains = np.maximum(diff, 0)
+            losses = np.maximum(-diff, 0)
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            rs = avg_gain / (avg_loss + 1e-8)
+            rsi = 100 - (100 / (1 + rs))
+            
+            # Bollinger Bands (20-day)
+            ma20 = np.mean(closes[:min(20, len(closes))])
+            std20 = np.std(closes[:min(20, len(closes))])
+            upper_band = ma20 + (2 * std20)
+            lower_band = ma20 - (2 * std20)
+            bb_width = (upper_band - lower_band)/(ma20 + 1e-8)
+            bb_position = (closes[0] - lower_band)/(upper_band - lower_band + 1e-8)
+            
+            # MACD (12-26-9)
+            # Simplified calculation using different weights
+            weights_12 = np.array([0.15, 0.12, 0.1, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01, 0.01])[:min(12, len(closes))]
+            weights_26 = np.array([0.08, 0.07, 0.07, 0.06, 0.06, 0.05, 0.05, 0.04, 0.04, 0.03, 0.03, 0.02, 0.02, 0.01, 0.01] * 2)[:min(26, len(closes))]
+            
+            ema12 = np.sum(weights_12 * closes[:len(weights_12)]) / np.sum(weights_12)
+            ema26 = np.sum(weights_26 * closes[:len(weights_26)]) / np.sum(weights_26)
+            macd = ema12 - ema26
+            
+            # Stochastic Oscillator (14-day)
+            if len(closes) >= 14 and len(highs) >= 14 and len(lows) >= 14:
+                highest_high = np.max(highs[:14])
+                lowest_low = np.min(lows[:14])
+                stoch_k = 100 * (closes[0] - lowest_low) / (highest_high - lowest_low + 1e-8)
+                
+                # Simplified %D calculation (3-day SMA of %K)
+                stoch_d = stoch_k  # Simplified for single timepoint
+            else:
+                stoch_k = 50
+                stoch_d = 50
+            
+            features.extend([
+                rsi / 100,            # RSI (normalized to 0-1)
+                bb_width,             # Bollinger Band width
+                bb_position,          # Position within Bollinger Bands
+                macd / (closes[0] + 1e-8),  # MACD normalized by price
+                stoch_k / 100         # Stochastic %K (normalized to 0-1)
+            ])
+        else:
+            features.extend([0.5, 0, 0.5, 0, 0.5])  # Default values for technical indicators
+        
+        # Feature Group 7: Advanced SI Indicators
+        # These are specialized indicators for short interest prediction
+        
+        # SI Pressure Index: Combines SI level, price momentum, and volume
+        si_pressure = 0
+        if len(closes) >= 5 and short_interest > 0:
+            days_to_cover = short_interest / (avg_volume + 1e-8)
+            price_momentum = returns_5d
+            
+            # SI pressure increases with high days to cover and positive price momentum
+            si_pressure = days_to_cover * (1 + price_momentum)
+            
+            # Normalize using tanh to keep within reasonable range
+            si_pressure = np.tanh(si_pressure / 10)
+        
+        # SI Reversal Signal: Detects potential reversals in short interest
+        si_reversal = 0
+        if len(si_history) >= 3 and len(closes) >= 3:
+            # SI trend
+            si_trend = si_history[0] - si_history[2]
+            
+            # Price trend opposite to SI trend could signal reversal
+            price_trend = closes[0] - closes[2]
+            
+            # If SI is increasing but price is also increasing, potential reversal
+            # If SI is decreasing but price is also decreasing, potential reversal
+            if (si_trend > 0 and price_trend > 0) or (si_trend < 0 and price_trend < 0):
+                si_reversal = np.sign(si_trend) * np.abs(price_trend) / (closes[2] + 1e-8)
+                
+                # Normalize
+                si_reversal = np.tanh(si_reversal * 5)
+        
+        # SI Concentration: Ratio of SI to market cap (approximated by price)
+        si_concentration = short_interest / (closes[0] + 1e-8) if len(closes) > 0 else 0
+        
+        # SI Efficiency: How effectively SI predicts price movements
+        si_efficiency = 0
+        if len(si_history) >= 2 and len(closes) >= 2:
+            si_direction = np.sign(si_history[0] - si_history[1])
+            price_direction = np.sign(closes[1] - closes[0])  # Inverse relationship expected
+            
+            # +1 if SI correctly predicts price (inverse relationship), -1 if wrong
+            si_efficiency = -1 * si_direction * price_direction
+        
+        features.extend([
+            si_pressure,              # SI Pressure Index
+            si_reversal,              # SI Reversal Signal
+            si_concentration,         # SI Concentration
+            si_efficiency             # SI Efficiency
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    # Normalize features to improve model training
+    # This helps prevent features with large magnitudes from dominating
+    for i in range(result.shape[1]):
+        col = result[:, i]
+        col_range = np.max(col) - np.min(col)
+        if col_range > 0:
+            # Scale to approximately [-1, 1] range while preserving 0
+            max_abs = max(abs(np.max(col)), abs(np.min(col)))
+            if max_abs > 0:
+                result[:, i] = col / max_abs
+    
+    return result
+============================================================
+
+ITERATION 10:
+Performance: MAPE = 47.72%
+Improvement: -5.72%
+Features: 43
+----------------------------------------
+def construct_features(data):
+    """
+    Constructs engineered features for short interest prediction.
+    
+    Args:
+        data: numpy array of shape (lookback_window, 62)
+            Feature 0: Short interest at time T
+            Feature 1: Average daily volume quantity of past 15 days
+            Features 2-61: OHLC prices for past 15 days (4 × 15 = 60 dimensions)
+    
+    Returns:
+        numpy array of shape (lookback_window, constructed_features)
+    """
+    # Handle edge case of empty data
+    if data.shape[0] == 0:
+        return np.zeros((0, 40))  # Return empty array with expected feature count
+    
+    # Initialize output array
+    lookback_window = data.shape[0]
+    engineered_features = []
+    
+    # Analysis of previous iterations:
+    # - Iteration 5 (MAPE 42.00%) was the best model with Feature_21, Feature_33, Feature_9, Feature_13, Feature_8 being most important
+    # - Iteration 9 (MAPE 42.35%) was close but didn't improve on the best model
+    # - Key improvements for this iteration:
+    #   1. Focus more on the specific features that were most important in the best model
+    #   2. Reduce feature count to avoid overfitting but maintain critical features
+    #   3. Improve normalization techniques for better feature scaling
+    #   4. Add more sophisticated SI-specific indicators based on financial domain knowledge
+    #   5. Enhance the short squeeze potential indicators which were important in best model
+    
+    for t in range(lookback_window):
+        # Get data for current timestamp
+        current_data = data[t]
+        
+        # Handle NaN values
+        current_data = np.nan_to_num(current_data, nan=0.0)
+        
+        # Extract key components
+        short_interest = current_data[0]
+        avg_volume = current_data[1]
+        
+        # Extract OHLC data (reshape to 15 days x 4 OHLC values)
+        ohlc_data = current_data[2:62].reshape(15, 4)
+        
+        # Extract specific components
+        opens = ohlc_data[:, 0]
+        highs = ohlc_data[:, 1]
+        lows = ohlc_data[:, 2]
+        closes = ohlc_data[:, 3]
+        
+        # Feature Group 1: Core SI and Volume Features
+        # These were consistently important across iterations
+        features = [
+            short_interest,                                # Original short interest (consistently important)
+            avg_volume,                                    # Original volume
+            np.log1p(short_interest),                      # Log-transformed SI (for better scaling)
+            np.log1p(avg_volume),                          # Log-transformed volume
+            short_interest / (avg_volume + 1e-8),          # Days to cover (key metric for short squeeze potential)
+        ]
+        
+        # Feature Group 2: SI History and Dynamics
+        # Extract SI history for temporal analysis
+        si_history = []
+        for i in range(min(4, t+1)):
+            prev_si = data[t-i, 0] if t-i >= 0 else 0
+            prev_si = 0 if np.isnan(prev_si) else prev_si
+            si_history.append(prev_si)
+        
+        # Fill history if needed
+        while len(si_history) < 4:
+            si_history.append(0)
+        
+        # SI change metrics (focus on robust calculations)
+        si_change = si_history[0] - si_history[1] if len(si_history) > 1 else 0
+        si_pct_change = si_change / (si_history[1] + 1e-8) if len(si_history) > 1 else 0
+        
+        # SI momentum (rate of change over different time periods)
+        si_momentum_2d = (si_history[0] - si_history[2]) / 2 if len(si_history) > 2 else 0
+        si_momentum_3d = (si_history[0] - si_history[3]) / 3 if len(si_history) > 3 else 0
+        
+        # Exponentially weighted SI (gives more weight to recent values)
+        if len(si_history) >= 3:
+            weights = np.array([0.6, 0.3, 0.1])
+            ema_si = np.sum(weights * si_history[:3]) / np.sum(weights)
+            # SI deviation from trend
+            si_trend_deviation = si_history[0] / (ema_si + 1e-8) - 1
+        else:
+            ema_si = si_history[0]
+            si_trend_deviation = 0
+        
+        # SI acceleration (change in momentum)
+        si_acceleration = 0
+        if len(si_history) >= 3:
+            recent_change = si_history[0] - si_history[1]
+            previous_change = si_history[1] - si_history[2]
+            si_acceleration = recent_change - previous_change
+        
+        features.extend([
+            si_change,                # Absolute change in SI
+            si_pct_change,            # Percentage change in SI
+            si_momentum_2d,           # 2-day SI momentum
+            si_momentum_3d,           # 3-day SI momentum (new)
+            si_trend_deviation,       # SI deviation from trend
+            si_acceleration           # SI acceleration (new)
+        ])
+        
+        # Feature Group 3: Price Dynamics
+        # These features capture price movements that might influence short interest
+        
+        # Basic price metrics
+        if len(closes) > 0:
+            current_close = closes[0]
+            current_open = opens[0]
+            
+            # Price returns over different timeframes
+            daily_return = (current_close/current_open - 1) if current_open != 0 else 0
+            
+            returns_1d = (current_close/closes[1] - 1) if len(closes) > 1 else 0
+            returns_3d = (current_close/closes[3] - 1) if len(closes) > 3 else 0
+            returns_5d = (current_close/closes[5] - 1) if len(closes) > 5 else 0
+            returns_10d = (current_close/closes[10] - 1) if len(closes) > 10 else 0
+            
+            # Price volatility measures
+            if len(closes) >= 5:
+                price_std = np.std(closes[:5])
+                price_volatility = price_std / (np.mean(closes[:5]) + 1e-8)
+                
+                # High-Low range volatility
+                hl_ranges = [(highs[i] - lows[i])/(opens[i] + 1e-8) for i in range(5)]
+                hl_volatility = np.mean(hl_ranges)  # Average daily range
+                
+                # Normalized price range (Feature_21 was most important in best model)
+                price_range_norm = (current_close - np.min(closes[:5])) / (np.max(closes[:5]) - np.min(closes[:5]) + 1e-8)
+            else:
+                price_volatility = 0
+                hl_volatility = 0
+                price_range_norm = 0.5
+            
+            # Moving averages
+            ma5 = np.mean(closes[:5]) if len(closes) >= 5 else current_close
+            ma10 = np.mean(closes[:10]) if len(closes) >= 10 else current_close
+            
+            # Price relative to moving averages
+            price_to_ma5 = current_close/ma5 - 1
+            price_to_ma10 = current_close/ma10 - 1
+            
+            # Price momentum (acceleration)
+            price_momentum = 0
+            if len(closes) >= 3:
+                recent_return = closes[0]/closes[1] - 1
+                previous_return = closes[1]/closes[2] - 1
+                price_momentum = recent_return - previous_return
+            
+            features.extend([
+                daily_return,         # Daily return
+                returns_3d,           # 3-day return
+                returns_5d,           # 5-day return
+                returns_10d,          # 10-day return (new)
+                price_volatility,     # Price volatility
+                hl_volatility,        # High-Low range volatility
+                price_range_norm,     # Normalized price range (Feature_21 equivalent - most important in best model)
+                price_to_ma5,         # Price relative to 5-day MA
+                price_to_ma10,        # Price relative to 10-day MA
+                price_momentum        # Price momentum/acceleration (new)
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0, 0.5, 0, 0, 0])
+        
+        # Feature Group 4: Volume Dynamics
+        # Volume patterns are critical for short interest prediction
+        
+        # Extract volume history
+        vol_history = []
+        for i in range(min(4, t+1)):
+            prev_vol = data[t-i, 1] if t-i >= 0 else avg_volume
+            prev_vol = avg_volume if np.isnan(prev_vol) else prev_vol
+            vol_history.append(prev_vol)
+        
+        # Fill history if needed
+        while len(vol_history) < 4:
+            vol_history.append(avg_volume)
+        
+        # Volume change metrics
+        vol_change = vol_history[0] - vol_history[1] if len(vol_history) > 1 else 0
+        vol_pct_change = vol_history[0] / (vol_history[1] + 1e-8) - 1 if len(vol_history) > 1 else 0
+        
+        # Volume trend
+        if len(vol_history) >= 3:
+            weights = np.array([0.6, 0.3, 0.1])
+            vol_trend = np.sum(weights * vol_history[:3]) / np.sum(weights)
+            vol_trend_ratio = vol_history[0] / (vol_trend + 1e-8)
+            
+            # Volume acceleration (change in momentum)
+            recent_change = vol_history[0] - vol_history[1]
+            previous_change = vol_history[1] - vol_history[2]
+            vol_acceleration = recent_change - previous_change
+        else:
+            vol_trend_ratio = 1.0
+            vol_acceleration = 0
+        
+        # Volume volatility
+        vol_volatility = np.std(vol_history) / (np.mean(vol_history) + 1e-8) if len(vol_history) > 1 else 0
+        
+        # Normalized volume (Feature_33 was important in best model)
+        vol_norm = vol_history[0] / (np.max(vol_history) + 1e-8) if len(vol_history) > 0 else 0
+        
+        features.extend([
+            vol_change,               # Absolute change in volume (new)
+            vol_pct_change,           # Percentage change in volume
+            vol_trend_ratio,          # Volume relative to trend
+            vol_volatility,           # Volume volatility
+            vol_acceleration,         # Volume acceleration (new)
+            vol_norm                  # Normalized volume (Feature_33 equivalent - important in best model)
+        ])
+        
+        # Feature Group 5: SI-Price-Volume Relationships
+        # These interaction features capture complex relationships between SI, price, and volume
+        
+        # SI relative to price (Feature_9 was important in best model)
+        si_to_price = short_interest / (closes[0] + 1e-8) if len(closes) > 0 else 0
+        
+        # SI change relative to price change
+        si_price_change_ratio = 0
+        if len(closes) > 1 and len(si_history) > 1:
+            price_change = closes[0] - closes[1]
+            si_price_change_ratio = si_change / (np.abs(price_change) + 1e-8)
+        
+        # SI relative to price volatility
+        si_vol_interaction = short_interest * price_volatility if len(closes) >= 5 else 0
+        
+        # Short squeeze potential indicator (refined from previous iteration)
+        short_squeeze_indicator = 0
+        if len(closes) >= 5 and short_interest > 0:
+            # Refined short squeeze indicator based on SI, price momentum, and volume
+            days_to_cover = short_interest / (avg_volume + 1e-8)
+            price_momentum = returns_5d
+            vol_surge = vol_pct_change
+            
+            # Weighted combination of factors
+            short_squeeze_indicator = (
+                0.5 * np.tanh(days_to_cover / 5) +  # Normalized days to cover (increased weight)
+                0.3 * np.tanh(price_momentum * 10) +  # Normalized price momentum
+                0.2 * np.tanh(vol_surge * 5)  # Normalized volume surge
+            )
+        
+        # SI-Volume correlation (Feature_13 was important in best model)
+        si_vol_correlation = 0
+        if len(si_history) >= 3 and len(vol_history) >= 3:
+            # Calculate correlation between SI and volume changes
+            si_changes = [si_history[i] - si_history[i+1] for i in range(2)]
+            vol_changes = [vol_history[i] - vol_history[i+1] for i in range(2)]
+            
+            # Simple correlation approximation
+            si_vol_correlation = np.sum([np.sign(si_changes[i]) * np.sign(vol_changes[i]) for i in range(2)]) / 2
+        
+        # SI to float ratio (approximation)
+        si_to_float_ratio = short_interest / (avg_volume * 20 + 1e-8)  # Assuming 20 days of volume as proxy for float
+        
+        features.extend([
+            si_to_price,              # SI relative to price (Feature_9 equivalent - important in best model)
+            si_price_change_ratio,    # SI change relative to price change
+            si_vol_interaction,       # SI-volatility interaction
+            short_squeeze_indicator,  # Short squeeze potential
+            si_vol_correlation,       # SI-Volume correlation (Feature_13 equivalent - important in best model)
+            si_to_float_ratio         # SI to float ratio (new)
+        ])
+        
+        # Feature Group 6: Technical Indicators
+        # These indicators were important in previous iterations
+        
+        if len(closes) >= 14:
+            # RSI calculation (14-day)
+            diff = np.diff(np.concatenate(([closes[0]], closes[:13])))
+            gains = np.maximum(diff, 0)
+            losses = np.maximum(-diff, 0)
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            rs = avg_gain / (avg_loss + 1e-8)
+            rsi = 100 - (100 / (1 + rs))
+            
+            # Bollinger Bands (20-day)
+            ma20 = np.mean(closes[:min(20, len(closes))])
+            std20 = np.std(closes[:min(20, len(closes))])
+            upper_band = ma20 + (2 * std20)
+            lower_band = ma20 - (2 * std20)
+            bb_width = (upper_band - lower_band)/(ma20 + 1e-8)
+            bb_position = (closes[0] - lower_band)/(upper_band - lower_band + 1e-8)
+            
+            # MACD (12-26-9)
+            # Simplified calculation using different weights
+            weights_12 = np.array([0.15, 0.12, 0.1, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01, 0.01])[:min(12, len(closes))]
+            weights_26 = np.array([0.08, 0.07, 0.07, 0.06, 0.06, 0.05, 0.05, 0.04, 0.04, 0.03, 0.03, 0.02, 0.02, 0.01, 0.01] * 2)[:min(26, len(closes))]
+            
+            ema12 = np.sum(weights_12 * closes[:len(weights_12)]) / np.sum(weights_12)
+            ema26 = np.sum(weights_26 * closes[:len(weights_26)]) / np.sum(weights_26)
+            macd = ema12 - ema26
+            
+            # Stochastic Oscillator (14-day)
+            if len(closes) >= 14 and len(highs) >= 14 and len(lows) >= 14:
+                highest_high = np.max(highs[:14])
+                lowest_low = np.min(lows[:14])
+                stoch_k = 100 * (closes[0] - lowest_low) / (highest_high - lowest_low + 1e-8)
+                
+                # Simplified %D calculation (3-day SMA of %K)
+                stoch_d = stoch_k  # Simplified for single timepoint
+            else:
+                stoch_k = 50
+                stoch_d = 50
+            
+            # OBV-inspired volume-price relationship (Feature_8 was important in best model)
+            obv_indicator = 0
+            if len(closes) >= 5:
+                for i in range(4):
+                    if i+1 < len(closes):
+                        price_direction = np.sign(closes[i] - closes[i+1])
+                        obv_indicator += price_direction * vol_history[0] if i == 0 else price_direction * avg_volume
+                
+                # Normalize
+                obv_indicator = np.tanh(obv_indicator / (5 * avg_volume))
+            
+            features.extend([
+                rsi / 100,            # RSI (normalized to 0-1)
+                bb_width,             # Bollinger Band width
+                bb_position,          # Position within Bollinger Bands
+                macd / (closes[0] + 1e-8),  # MACD normalized by price
+                stoch_k / 100,        # Stochastic %K (normalized to 0-1)
+                obv_indicator         # OBV-inspired indicator (Feature_8 equivalent - important in best model)
+            ])
+        else:
+            features.extend([0.5, 0, 0.5, 0, 0.5, 0])  # Default values for technical indicators
+        
+        # Feature Group 7: Advanced SI Indicators
+        # These are specialized indicators for short interest prediction
+        
+        # SI Pressure Index: Combines SI level, price momentum, and volume
+        si_pressure = 0
+        if len(closes) >= 5 and short_interest > 0:
+            days_to_cover = short_interest / (avg_volume + 1e-8)
+            price_momentum = returns_5d
+            
+            # SI pressure increases with high days to cover and positive price momentum
+            si_pressure = days_to_cover * (1 + price_momentum)
+            
+            # Normalize using tanh to keep within reasonable range
+            si_pressure = np.tanh(si_pressure / 10)
+        
+        # SI Reversal Signal: Detects potential reversals in short interest
+        si_reversal = 0
+        if len(si_history) >= 3 and len(closes) >= 3:
+            # SI trend
+            si_trend = si_history[0] - si_history[2]
+            
+            # Price trend opposite to SI trend could signal reversal
+            price_trend = closes[0] - closes[2]
+            
+            # If SI is increasing but price is also increasing, potential reversal
+            # If SI is decreasing but price is also decreasing, potential reversal
+            if (si_trend > 0 and price_trend > 0) or (si_trend < 0 and price_trend < 0):
+                si_reversal = np.sign(si_trend) * np.abs(price_trend) / (closes[2] + 1e-8)
+                
+                # Normalize
+                si_reversal = np.tanh(si_reversal * 5)
+        
+        # SI Concentration: Ratio of SI to market cap (approximated by price)
+        si_concentration = short_interest / (closes[0] + 1e-8) if len(closes) > 0 else 0
+        
+        # SI Efficiency: How effectively SI predicts price movements
+        si_efficiency = 0
+        if len(si_history) >= 2 and len(closes) >= 2:
+            si_direction = np.sign(si_history[0] - si_history[1])
+            price_direction = np.sign(closes[1] - closes[0])  # Inverse relationship expected
+            
+            # +1 if SI correctly predicts price (inverse relationship), -1 if wrong
+            si_efficiency = -1 * si_direction * price_direction
+        
+        features.extend([
+            si_pressure,              # SI Pressure Index
+            si_reversal,              # SI Reversal Signal
+            si_concentration,         # SI Concentration
+            si_efficiency             # SI Efficiency
+        ])
+        
+        # Add features for current timestamp to output
+        engineered_features.append(features)
+    
+    # Convert to numpy array
+    result = np.array(engineered_features)
+    
+    # Final safety check for NaN and inf values
+    result = np.nan_to_num(result, nan=0.0, posinf=1e9, neginf=-1e9)
+    
+    # Improved normalization strategy:
+    # 1. First clip extreme outliers (beyond 3 std devs)
+    # 2. Then normalize features to improve model training
+    for i in range(result.shape[1]):
+        col = result[:, i]
+        
+        # Skip columns that are already well-scaled
+        if np.max(np.abs(col)) <= 1.0:
+            continue
+            
+        # Clip outliers (beyond 3 standard deviations)
+        mean = np.mean(col)
+        std = np.std(col)
+        if std > 0:
+            col = np.clip(col, mean - 3*std, mean + 3*std)
+        
+        # Scale to approximately [-1, 1] range while preserving 0
+        max_abs = max(abs(np.max(col)), abs(np.min(col)))
+        if max_abs > 0:
+            result[:, i] = col / max_abs
+    
+    return result
+============================================================
+

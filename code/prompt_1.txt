@@ -1,0 +1,116 @@
+
+You are a financial data scientist specializing in **feature engineering for short-interest prediction** on equity time series.
+
+## Data schema
+- Input to your function: a **numpy array** `data` with shape **(lookback_window, 62)** for a *single* sample.
+- Feature layout at each timestep `t`:
+  - `data[t, 0]` → **short interest** at time *T* (reported every 15 days)
+  - `data[t, 1]` → **average daily volume (past 15 days)**
+  - `data[t, 2:62]` → **OHLC** over the past 15 days, flattened as **15 days × 4 columns** in order **[O, H, L, C]**  
+    Use: `ohlc = data[t, 2:].reshape(15, 4)` → `open, high, low, close = ohlc[:,0], ohlc[:,1], ohlc[:,2], ohlc[:,3]`.
+
+Total: 1 + 1 + 60 = 62 features per timestamp.
+
+## Dataset constraints
+- Only ~180 total samples available (very small).
+- To reduce overfitting: **keep only the useful raw channels** and add **new features** so that **(kept raw + new) ≤ 85 total columns**.
+- You **may drop** raw channels with consistently low importance or redundancy.
+- Avoid redundant or near-duplicate engineered features. Prefer a small, diverse set.
+
+
+
+PERFORMANCE HISTORY:
+Iteration 0: Baseline - MAPE: 8.33%
+  Features: All 62 original features
+  DL-Based Feature Importance Analysis:
+    • Top important features: Feature_0 (importance=0.0005), Feature_1 (importance=0.0003), Feature_54 (importance=0.0002), Feature_31 (importance=0.0001), Feature_53 (importance=0.0001)
+
+
+
+
+
+
+
+ERROR FEEDBACK FROM PREVIOUS ATTEMPTS:
+The following errors occurred in previous attempts. Please analyze these errors and ensure your code avoids these issues:
+
+Error 1:
+  • Error Type: ExecutionError
+  • Error Message: Function execution failed (attempt 1/3)
+  • Problematic Code: def construct_features(data):
+    RAW_DIM = 62
+    MAX_TOTAL = 80
+    
+    lookback_window = data.shape[0]
+    features = np.zeros((lookback_window, MAX_TOTAL), dtype=np.float32)
+    
+    for t in ran...
+
+IMPORTANT: Your new code must avoid these specific errors. Pay special attention to:
+- Array dimension mismatches and shape issues
+- Proper handling of edge cases and NaN values
+- Correct return value format (2D numpy array)
+- Robust error handling within the function
+
+
+
+
+CURRENT TASK (Iteration 1):
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 8.33%.
+
+### Strategy
+- Learn from previous iterations: refine or extend **high-importance** areas, drop or transform **low-importance** ones.
+- Learn from previous iterations: keep the features with high feature importance, drop the features with low feature importance.
+- Use **financial domain knowledge**.
+- Maintain **LSTM-compatible** time series structure.
+- Keep the feature set **compact and non-redundant** due to the small sample size.
+
+### HARD IMPLEMENTATION RULES (must follow to avoid index errors and ensure a stable shape)
+- Define constants at the top of the function:
+  - `RAW_DIM = 62`
+  - `MAX_TOTAL = 80`
+  - `MAX_NEW = MAX_TOTAL - 1`  # upper bound; actual new count is determined after raw selection, see below
+- **Do NOT preallocate** a fixed-width array and write with a moving `idx`.  
+  Instead, for each timestep `t`:
+  1) Build two Python lists:
+     - `raw_keep = []`  (subset of raw features you choose to keep at t, but your selection logic must be **the same for all timesteps** so the final width is constant)
+     - `eng = []`       (engineered features you append one by one)
+  2) Always include in `raw_keep`: short interest (index 0) and average volume (index 1).
+     Prefer **compact OHLC summaries** over copying all 60 OHLC channels (e.g., last-bar O,H,L,C; mean/median close over last 5; normalized range).
+  3) After `raw_keep` is formed, compute `MAX_NEW = MAX_TOTAL - len(raw_keep)`.  
+     **Never exceed this cap** when appending to `eng`.
+  4) For every engineered candidate, **append to `eng`**.  
+     If you hit the cap (`len(eng) == MAX_NEW`), **stop adding** more features (no exceptions).
+  5) **Never reference** engineered columns by hard-coded indices (e.g., `features[t, 62+7]` is forbidden).  
+     If you need a previously computed engineered value, **reuse the local variable** (e.g., `rsi_val`), not a column number.
+  6) Ensure the column count is **identical for all timesteps** (no branch-induced width changes).  
+     If a feature cannot be computed (e.g., insufficient points), **append a 0 placeholder** for that slot so widths remain equal.
+  7) Construct the row with concatenation:
+     - `row = np.array(raw_keep + eng, dtype=np.float32)`
+     - If `row.size < MAX_TOTAL`, **pad with zeros** to length `MAX_TOTAL`.
+     - If `row.size > MAX_TOTAL`, **truncate the tail** to `MAX_TOTAL`.
+- After looping over timesteps, stack rows into a 2D array with shape `(lookback_window, MAX_TOTAL)` and return it.
+- The function must **never attempt to write past** column index `MAX_TOTAL - 1`.
+
+### Requirements
+1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features).
+2. The function must:
+   - **Select and preserve only the useful raw features** (you may drop low-importance raw channels).
+   - Add **new, diverse features** while enforcing **(kept raw + new) ≤ 80**.
+   - Avoid near-duplicates: do not include multiple horizons of the same measure unless clearly distinct.
+   - Use **eps clamping** for all divisions: `den = max(abs(den), 1e-8)`.
+   - Apply `np.nan_to_num(..., nan=0.0, posinf=0.0, neginf=0.0)` before return.
+3. Process each timestep independently but maintain the temporal axis (lookback_window).
+4. Focus on the **most predictive and stable** features using DL-based importance + domain knowledge.
+5. Include **inline comments** explaining how you improved on previous attempts and why each new feature matters.
+6. Code must be **production-ready**: numerically safe, vectorized where reasonable, no randomness or printing.
+7. DO NOT include imports — these are already available: `np, pd, math, statistics, stats, StandardScaler, MinMaxScaler, mean_squared_error, mean_absolute_error, datetime, time`.
+8. Return a **2D numpy array** `(lookback_window, constructed_features)` with dtype `float32`.
+
+### Strong redundancy rules
+- **One per family** unless clearly distinct (e.g., choose either SMA ratio or z-score, not both).
+- Drop overlapping or affine equivalents (e.g., SMA ratio vs z-score with same window).
+- Avoid fragile ops (`np.corrcoef`, polynomial fits, EMA on <3 points); prefer simple, stable ratios.
+
+### Deliverable
+Return **ONLY** the Python function code (no text outside the code).

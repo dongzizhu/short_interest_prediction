@@ -1,0 +1,23 @@
+================================================================================
+ENHANCED ITERATIVE AGENT-BASED FEATURE SELECTION REPORT
+================================================================================
+Stock: PFE
+Date: 2025-09-17 18:55:13
+Total Iterations: 5
+
+PERFORMANCE SUMMARY:
+----------------------------------------
+Baseline MAPE: 10.13%
+Best MAPE: 8.86%
+Total Improvement: 1.27% (12.5% relative)
+Feature Reduction: 32.3%
+Success Rate: 20.0%
+
+DETAILED RESULTS WITH STATISTICAL ANALYSIS:
+----------------------------------------
+Iteration 0: Baseline
+  MAPE: 10.13%
+  Features: 62
+  Improvement: +0.00%
+  Source: baseline
+  Statistical Analysis:

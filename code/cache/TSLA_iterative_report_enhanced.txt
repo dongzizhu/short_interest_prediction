@@ -1,0 +1,25 @@
+================================================================================
+ENHANCED ITERATIVE AGENT-BASED FEATURE SELECTION REPORT
+================================================================================
+Stock: TSLA
+Date: 2025-09-23 00:24:58
+Total Iterations: 3
+
+PERFORMANCE SUMMARY:
+----------------------------------------
+Baseline MAPE: 7.69%
+Best MAPE: 7.69%
+Total Improvement: 0.00% (0.0% relative)
+Feature Reduction: 0.0%
+Success Rate: 0.0%
+
+DETAILED RESULTS WITH STATISTICAL ANALYSIS:
+----------------------------------------
+Iteration 0: Baseline
+  MAPE: 7.69%
+  Features: 62
+  Improvement: +0.00%
+  Source: baseline
+  Statistical Analysis:
+    • Significant features (p < 0.05): 24
+    • Highly significant features (p < 0.01): 22

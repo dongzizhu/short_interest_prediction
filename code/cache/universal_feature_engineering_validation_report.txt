@@ -1,0 +1,31 @@
+================================================================================
+UNIVERSAL FEATURE ENGINEERING VALIDATION REPORT
+================================================================================
+Generated on: 2025-10-03 17:45:48
+Total tickers tested: 2
+Successful tests: 2
+Failed tests: 0
+
+SUMMARY STATISTICS:
+Average MAPE improvement: -2.84%
+Median MAPE improvement: -2.84%
+Std deviation: 0.15%
+Min improvement: -2.99%
+Max improvement: -2.69%
+
+RELATIVE IMPROVEMENT STATISTICS:
+Average relative improvement: -30.6%
+Median relative improvement: -30.6%
+Std deviation: 1.0%
+
+IMPROVEMENT DISTRIBUTION:
+Tickers with positive improvement: 0/2 (0.0%)
+Tickers with >0.5% improvement: 0/2 (0.0%)
+
+DETAILED RESULTS:
+----------------------------------------------------------------------------------------------------
+Ticker   Baseline MAPE Enhanced MAPE Improvement  Rel. Imp.  Features    
+----------------------------------------------------------------------------------------------------
+PFE      10.14        13.13         -2.99        -29.5      62->50
+MSFT     8.52         11.22         -2.69        -31.6      62->50
+----------------------------------------------------------------------------------------------------
