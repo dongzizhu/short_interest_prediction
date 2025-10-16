@@ -27,7 +27,7 @@ except ImportError:
 class EnhancedLSTMTimeSeries(nn.Module):
     """Enhanced LSTM model for time series prediction."""
     
-    def __init__(self, input_size: int = 62, hidden_size: int = 64, num_layers: int = 3, 
+    def __init__(self, input_size: int =97, hidden_size: int = 64, num_layers: int = 3, 
                  output_size: int = 1, dropout: float = 0.2):
         super().__init__()
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
@@ -321,8 +321,8 @@ class ModelTrainer:
         
         print(f"📈 DL-Based Feature Importance Analysis:")
         print(f"   • Total features: {len(feature_stats)}")
-        print(f"   • Important features (top 10%): {len(significant_features)}")
-        print(f"   • Highly important features (top 5%): {len(highly_significant)}")
+        print(f"   • Important features (relative importance larger than 0.3): {len(significant_features)}")
+        print(f"   • Highly important features (relative importance larger than 0.5): {len(highly_significant)}")
         
         # Show top 5 most important features with their importance scores
         sorted_features = sorted(feature_stats.items(), key=lambda x: x[1]['importance'], reverse=True)
@@ -466,8 +466,8 @@ class ModelTrainer:
             feature_importance[feature_names[i]] = {
                 'importance': importance,
                 'relative_importance': relative_importance,
-                'significant': relative_importance > 0.1,  # Top 10% of features
-                'highly_significant': relative_importance > 0.2,  # Top 5% of features
+                'significant': relative_importance > 0.3,  
+                'highly_significant': relative_importance > 0.5, 
                 'rank': 0  # Will be updated after all features are processed
             }
         

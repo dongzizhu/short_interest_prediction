@@ -27,6 +27,7 @@ class DataLoader:
         self.config = config
         self._ticker_timeseries = None
         self._price_data = None
+        self._extra_features = None
     
     def load_ticker_timeseries(self) -> Dict[str, Any]:
         """Load ticker timeseries data from cache."""
@@ -37,7 +38,24 @@ class DataLoader:
             except FileNotFoundError:
                 raise FileNotFoundError(f"Ticker timeseries file not found: {self.config.ticker_timeseries_path}")
         return self._ticker_timeseries
-    
+
+    def load_extra_features(self) -> Dict[str, Any]:
+        """Load extra features from cache."""
+        if self._extra_features is None:
+            try:
+                self._extra_features = pd.read_parquet(self.config.extra_features_path)
+            except FileNotFoundError:
+                raise FileNotFoundError(f"Extra features file not found: {self.config.extra_features_path}")
+        return self._extra_features
+
+    def load_short_volume_data(self) -> Dict[str, Any]:
+        """Load short volume data from parquet file."""
+        try:
+            short_volume_data = pd.read_parquet(self.config.short_volume_path)
+            return short_volume_data
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Short volume data file not found: {self.config.short_volume_path}")
+
     def load_price_data(self) -> pd.DataFrame:
         """Load price data from parquet file."""
         if self._price_data is None:
@@ -79,6 +97,43 @@ class DataLoader:
             ohlc_data = ohlc_data.dropna(how='all')
             
             return ohlc_data
+            
+        except KeyError as e:
+            print(f"Error: Date range or ticker not found in data. {e}")
+            return pd.DataFrame()
+        except Exception as e:
+            print(f"Error: {e}")
+            return pd.DataFrame()
+    
+    def get_short_volume_data(self, df: pd.DataFrame, ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        Extract short volume data for a specific ticker within a date range.
+        
+        Parameters:
+        df (DataFrame): The DataFrame with MultiIndex columns (ticker, metric)
+        ticker (str): The ticker symbol to extract data for
+        start_date (str or datetime): Start date in 'YYYY-MM-DD' format
+        end_date (str or datetime): End date in 'YYYY-MM-DD' format
+        
+        Returns:
+        DataFrame: Short volume data with columns ['ShortVolume', 'TotalVolume']
+        """
+        try:
+            # Check if ticker exists in the data
+            if ('ShortVolume', ticker) not in df.columns:
+                raise ValueError(f"Ticker '{ticker}' not found in short volume data.")
+            
+            # Extract short volume columns for the specific ticker
+            short_vol_data = df.loc[start_date:end_date, [('ShortVolume', ticker), 
+                                                          ('TotalVolume', ticker)]]
+            
+            # Rename columns to remove the ticker prefix for cleaner output
+            short_vol_data.columns = ['ShortVolume', 'TotalVolume']
+            
+            # Remove rows with all NaN values
+            short_vol_data = short_vol_data.dropna(how='all')
+            
+            return short_vol_data
             
         except KeyError as e:
             print(f"Error: Date range or ticker not found in data. {e}")
@@ -154,7 +209,68 @@ class DataLoader:
         price_features = np.where(np.isnan(price_features), col_means, price_features)
         
         return price_features
-    
+
+    def create_short_volume_features(self, si_dates: pd.Index, short_vol_data: pd.DataFrame, gap_days: int) -> np.ndarray:
+        """
+        Create short volume features for each SI date.
+        Features: [day1_short_volume, day1_total_volume, ..., dayN_short_volume, dayN_total_volume]
+        Total: 2 * gap_days features
+
+        Parameters:
+        si_dates: pandas Index of SI reporting dates
+        short_vol_data: DataFrame with short volume data (columns: ShortVolume, TotalVolume)
+
+        Returns:
+        numpy array of shape (len(si_dates), 2 * gap_days)
+        """
+        if short_vol_data.empty:
+            print("No short volume data available, creating zero features")
+            return np.zeros((len(si_dates), 2 * gap_days))
+
+        short_volume_features = []
+
+        for si_date in si_dates:
+            si_datetime = pd.to_datetime(si_date)
+
+            # Define the window (gap_days before the SI date)
+            window_end = si_datetime - timedelta(days=1)  # Day before SI date
+
+            features = []
+
+            # Get short volume data for each of the gap_days
+            for day_offset in range(gap_days):
+                target_date = window_end - timedelta(days=day_offset)
+
+                # Find the closest trading day (in case of weekends/holidays)
+                closest_date = None
+                min_diff = timedelta(days=10)  # Max search window
+
+                for vol_date in short_vol_data.index:
+                    diff = abs(vol_date.date() - target_date.date())
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_date = vol_date
+
+                if closest_date is not None and min_diff <= timedelta(days=3):  # Within 3 days
+                    day_data = short_vol_data.loc[closest_date]
+                    features.extend([
+                        day_data['ShortVolume'],
+                        day_data['TotalVolume']
+                    ])
+                else:
+                    # No data available, use NaNs
+                    features.extend([np.nan, np.nan])
+
+            short_volume_features.append(features)
+
+        short_volume_features = np.array(short_volume_features)
+
+        # Handle NaNs by imputing with column means
+        col_means = np.nanmean(short_volume_features, axis=0)
+        short_volume_features = np.where(np.isnan(short_volume_features), col_means, short_volume_features)
+
+        return short_volume_features
+
     def load_data_for_ticker(self, stock: str, ifFake: bool = False) -> Dict[str, Any]:
         """
         Load and preprocess data for a specific ticker.
@@ -171,9 +287,9 @@ class DataLoader:
         if ifFake:
             print("Using fake data for testing purposes")
             np.random.seed(42)
-            X_train_raw = np.random.randn(106, 4, 62)
-            X_val_raw = np.random.randn(36, 4, 62)
-            X_test_raw = np.random.randn(36, 4, 62)
+            X_train_raw = np.random.randn(106, 4, 97)
+            X_val_raw = np.random.randn(36, 4, 97)
+            X_test_raw = np.random.randn(36, 4, 97)
             y_train = np.random.randn(106, 1)
             y_val = np.random.randn(36, 1)
             y_test = np.random.randn(36, 1)
@@ -187,6 +303,8 @@ class DataLoader:
         else:
             # Load ticker timeseries data (SI and Volume)
             ticker_timeseries = self.load_ticker_timeseries()
+            ticker_extra_features = self.load_extra_features()
+            ticker_short_volume = self.load_short_volume_data()
             
             # Load parquet file with price data
             print(f"Loading parquet file: {self.config.parquet_path}")
@@ -201,7 +319,15 @@ class DataLoader:
             
             print(f"SI dates range: {si_dates.min()} to {si_dates.max()}")
             print(f"Number of SI observations: {len(si_dates)}")
-            
+
+            # Get extra features for the stock
+            options_put_call_volume_ratio = ticker_extra_features[stock]['options_put_call_volume_ratio'].reindex(si_dates).fillna(method='ffill').fillna(0).values.reshape(-1, 1)
+            options_synthetic_short_cost = ticker_extra_features[stock]['options_synthetic_short_cost'].reindex(si_dates).fillna(method='ffill').fillna(0).values.reshape(-1, 1)
+            options_avg_implied_volatility = ticker_extra_features[stock]['options_avg_implied_volatility'].reindex(si_dates).fillna(method='ffill').fillna(0).values.reshape(-1, 1)
+            shares_outstanding = ticker_extra_features[stock]['shares_outstanding'].reindex(si_dates).fillna(method='ffill').fillna(0).values.reshape(-1, 1)
+            # volume = ticker_extra_features[stock]['volume'].reindex(si_dates).fillna(method='ffill').fillna(0).values.reshape(-1, 1)
+            days_to_cover = ticker_extra_features[stock]['daysToCoverQuantity'].reindex(si_dates).fillna(method='ffill').fillna(0).values.reshape(-1, 1)
+
             # Get OHLC data for the stock
             print(f"Extracting OHLC data for {stock}...")
             start_date = si_dates.min() - timedelta(days=30)  # Add buffer for lookback
@@ -216,10 +342,21 @@ class DataLoader:
             print(f"Creating price features with {self.config.gap_days} days lookback...")
             price_features = self.create_price_features_from_parquet(si_dates, price_data, self.config.gap_days)
             print(f"Price features shape: {price_features.shape}")
+
+            short_volume_data = self.get_short_volume_data(ticker_short_volume, stock, start_date, end_date)
+            print(f"Retrieved short volume data for {len(short_volume_data)} days")
+            if not short_volume_data.empty:
+                print(f"Short volume data date range: {short_volume_data.index.min()} to {short_volume_data.index.max()}")
+            
+            print(f"Creating short volume features with {self.config.gap_days} days lookback...")
+            short_volume_features = self.create_short_volume_features(si_dates, short_volume_data, self.config.gap_days)
+            print(f"Short volume features shape: {short_volume_features.shape}")
             
             # Combine all features: [SI, Volume, 60 price features]
-            level_series = np.concatenate([SI_series, vol_series, price_features], axis=1)  # (T, 62)
-            print(f"Combined features shape: {level_series.shape}")
+            level_series = np.concatenate([SI_series, vol_series, days_to_cover, price_features, 
+                                           options_put_call_volume_ratio, options_synthetic_short_cost, options_avg_implied_volatility, 
+                                           shares_outstanding, short_volume_features], axis=1)  # (T, 97)
+            print(f"Combined features shape without short volume: {level_series.shape}")
             
             # Create log-return targets
             eps = self.config.eps  # to avoid log(0)
@@ -263,7 +400,13 @@ class DataLoader:
             'gap_days': self.config.gap_days,
             'price_data_shape': price_data.shape if not price_data.empty else (0, 0)
         }
-        
+
+        # save data_to_save for testing
+        # save_path = Path(f"processed_data_{stock}.pkl")
+        # pickle.dump(data_to_save, open(save_path, 'wb'))
+        # print(f"Processed data saved to {save_path}")
+        # exit(0)
+
         return data_to_save
     
     def _make_windows_level_to_logret(self, level_series: np.ndarray, y_log: np.ndarray, 
@@ -271,10 +414,10 @@ class DataLoader:
         """Create supervised windows with log-return targets."""
         X_list, y_logret_list, prev_log_list = [], [], []
         for t in range(lookback, len(level_series)):
-            X_list.append(level_series[t - lookback:t, :])                  # (L, 62)
+            X_list.append(level_series[t - lookback:t, :])                  # (L, 97)
             y_logret_list.append([y_log[t] - y_log[t - 1]])                 # (1,)
             prev_log_list.append(y_log[t - 1])   
-        X = np.asarray(X_list)                          # (N, L, 62)
+        X = np.asarray(X_list)                          # (N, L, 97)
         y_logret = np.asarray(y_logret_list)            # (N, 1)
         prev_log = np.asarray(prev_log_list)            # (N,)
         return X, y_logret, prev_log

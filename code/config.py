@@ -19,6 +19,8 @@ class DataConfig:
     # Data paths
     parquet_path: str = '../data/price_data_multiindex_20250904_113138.parquet'
     ticker_timeseries_path: str = 'cache/ticker_timeseries.pkl'
+    extra_features_path: str = '../data/combined_data_pruned_20251005_121936.parquet'
+    short_volume_path: str = '../data/daily_short_volume.parquet'
     
     # Data splitting
     train_split: float = 0.6  # 60% for training
@@ -30,7 +32,7 @@ class DataConfig:
     gap_days: int = 15  # Number of days to look back for price features
     
     # Feature dimensions
-    total_features: int = 62  # SI(1) + Volume(1) + OHLC(4*15=60)
+    total_features: int = 97
     
     # Data preprocessing
     eps: float = 1e-8  # Small value to avoid log(0)
@@ -78,7 +80,7 @@ class LLMConfig:
     temperature: float = 0.2
     
     # Retry settings
-    max_claude_retries: int = 3
+    max_claude_retries: int = 5
     max_feature_retries: int = 5
     
     # Iteration settings
@@ -215,6 +217,27 @@ def get_production_config() -> Config:
         data_config=DataConfig(),
         model_config=ModelConfig(epochs=150, patience=20),  # More thorough training
         llm_config=LLMConfig(max_iterations=10, min_improvement_threshold=0.1),
+        evaluation_config=EvaluationConfig(max_validation_tickers=None),
+        system_config=SystemConfig(verbose=False, use_multiprocessing=True)
+    )
+
+def get_production_SVM_config() -> Config:
+    """Configuration optimized for production runs."""
+    return Config(
+        data_config=DataConfig(lookback_window=4),
+        model_config=ModelConfig(),  # More thorough training
+        llm_config=LLMConfig(max_iterations=10, min_improvement_threshold=0.1),
+        evaluation_config=EvaluationConfig(max_validation_tickers=None),
+        system_config=SystemConfig(verbose=False, use_multiprocessing=True)
+    )
+
+
+def get_quick_test_SVM_config() -> Config:
+    """Configuration optimized for production runs."""
+    return Config(
+        data_config=DataConfig(lookback_window=4),
+        model_config=ModelConfig(),  # More thorough training
+        llm_config=LLMConfig(max_iterations=1, min_improvement_threshold=0.1),
         evaluation_config=EvaluationConfig(max_validation_tickers=None),
         system_config=SystemConfig(verbose=False, use_multiprocessing=True)
     )

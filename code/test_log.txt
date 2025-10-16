@@ -1,0 +1,1402 @@
+🚀 Modular Iterative Agent-Based Feature Selection Examples
+======================================================================
+✅ API key loaded successfully
+
+🔍 Example: Multi-Ticker Processing with SVM
+==================================================
+🤖 Using SVM model with kernel: rbf
+   C: 1.0, Gamma: scale
+   Epsilon: 0.1, Max iterations: 1000
+Using device: cpu
+✅ Claude API client initialized successfully!
+🚀 Starting Multi-Ticker Iterative Agent-Based Feature Selection Process
+================================================================================
+Processing iterative tickers: SLG, ABM
+Available for validation: TSLA, PFE
+================================================================================
+
+================================================================================
+PROCESSING TICKER 1/2: SLG
+================================================================================
+🚀 Starting Iterative Agent-Based Feature Selection Process for SLG
+======================================================================
+📊 Loading data from parquet file...
+📊 Loading data for SLG from parquet file...
+Loading parquet file: ../data/price_data_multiindex_20250904_113138.parquet
+Parquet file loaded. Shape: (6499, 46544)
+Date range: 1999-11-01 00:00:00 to 2025-09-03 00:00:00
+SI dates range: 2017-12-29 00:00:00 to 2025-07-15 00:00:00
+Number of SI observations: 182
+Extracting OHLC data for SLG...
+Retrieved price data for 1918 trading days
+Price data date range: 2017-11-29 00:00:00 to 2025-07-18 00:00:00
+Creating price features with 15 days lookback...
+Price features shape: (182, 60)
+Retrieved short volume data for 1916 days
+Short volume data date range: 2017-12-01 00:00:00 to 2025-07-18 00:00:00
+Creating short volume features with 15 days lookback...
+Short volume features shape: (182, 30)
+Combined features shape without short volume: (182, 97)
+Training data shape: (106, 4, 97)
+Validation data shape: (36, 4, 97)
+Test data shape: (36, 4, 97)
+✅ Data integrity validation passed
+✅ Data loaded successfully!
+Training data shape: (106, 4, 97)
+Validation data shape: (36, 4, 97)
+Test data shape: (36, 4, 97)
+Features per timestep: 97
+Lookback window: 4
+
+🎯 Step 1: Running baseline model on validation set...
+
+==================================================
+Training Baseline (All 97 Features) (SVM)
+==================================================
+Training SVM model...
+
+Baseline (All 97 Features) Performance:
+MAE: 747582.0063
+RMSE: 1120316.5031
+MAPE: 5.68%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 388
+   • Important features (top 10%): 264
+   • Highly important features (top 5%): 201
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_90_t3: importance=0.0007, rank=1
+   2. Feature_71_t2: importance=0.0002, rank=2
+   3. Feature_63_t2: importance=0.0001, rank=3
+   4. Feature_91_t3: importance=0.0001, rank=4
+   5. Feature_64_t2: importance=0.0001, rank=5
+
+📊 Baseline Performance: MAPE = 5.68%
+
+🔄 Starting iterative improvement process...
+Max iterations: 1
+Min improvement threshold: 0.1%
+Patience: 5 iterations without improvement
+
+======================================================================
+ITERATION 1
+======================================================================
+🤖 Calling Claude for iteration 1...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    RAW_DIM = 97
+    MAX_TOTAL = 25
+    
+    lookback_window = data.shape[0]
+    features = np.zeros((lookback_window, MAX_TOTAL), dtype=np.float32)
+    
+    for t in range(lookback_window):
+        # Start with essential raw features to keep
+        raw_keep = [
+            data[t, 0],  # short interest
+            data[t, 1],  # average daily volume
+            data[t, 2],  # days to cover
+            data[t, 63],  # options_put_call_volume_ratio
+            data[t, 64],  # options_synthetic_short_cost
+            data[t, 65],  # options_avg_implied_volatility
+        ]
+        
+        # Extract OHLC data for the past 15 days
+        ohlc = data[t, 3:63].reshape(15, 4)
+        open_prices, high_prices, low_prices, close_prices = ohlc[:, 0], ohlc[:, 1], ohlc[:, 2], ohlc[:, 3]
+        
+        # Extract short interest volume and total trading volume
+        short_volume = data[t, 67:82]
+        total_volume = data[t, 82:97]
+        
+        # Calculate MAX_NEW based on raw features kept
+        MAX_NEW = MAX_TOTAL - len(raw_keep)
+        
+        # Initialize engineered features list
+        eng = []
+        
+        # 1. Short Volume Ratio (daily short volume / total volume)
+        # This is a key indicator of short selling pressure
+        short_volume_ratio = np.zeros_like(short_volume)
+        for i in range(len(short_volume)):
+            denom = max(abs(total_volume[i]), 1e-8)
+            short_volume_ratio[i] = short_volume[i] / denom
+        
+        # Average short volume ratio over the past 15 days
+        avg_short_volume_ratio = np.mean(short_volume_ratio)
+        eng.append(avg_short_volume_ratio)
+        
+        # 2. Recent trend in short volume ratio (last 5 days vs previous 10)
+        recent_svr = np.mean(short_volume_ratio[-5:])
+        previous_svr = np.mean(short_volume_ratio[:-5])
+        denom = max(abs(previous_svr), 1e-8)
+        svr_trend = recent_svr / denom - 1
+        eng.append(svr_trend)
+        
+        # 3. Price momentum (5-day)
+        if len(close_prices) >= 5:
+            price_momentum_5d = close_prices[-1] / max(abs(close_prices[-5]), 1e-8) - 1
+        else:
+            price_momentum_5d = 0
+        eng.append(price_momentum_5d)
+        
+        # 4. Price volatility (standard deviation of returns)
+        if len(close_prices) >= 2:
+            returns = np.diff(close_prices) / np.maximum(close_prices[:-1], 1e-8)
+            price_volatility = np.std(returns) if len(returns) > 0 else 0
+        else:
+            price_volatility = 0
+        eng.append(price_volatility)
+        
+        # 5. Average True Range (ATR) - volatility indicator
+        tr_values = []
+        for i in range(1, len(close_prices)):
+            high_low = high_prices[i] - low_prices[i]
+            high_close_prev = abs(high_prices[i] - close_prices[i-1])
+            low_close_prev = abs(low_prices[i] - close_prices[i-1])
+            tr = max(high_low, high_close_prev, low_close_prev)
+            tr_values.append(tr)
+        
+        atr = np.mean(tr_values) if tr_values else 0
+        eng.append(atr)
+        
+        # 6. RSI (Relative Strength Index)
+        if len(close_prices) >= 3:
+            delta = np.diff(close_prices)
+            gain = np.where(delta > 0, delta, 0)
+            loss = np.where(delta < 0, -delta, 0)
+            avg_gain = np.mean(gain) if len(gain) > 0 else 0
+            avg_loss = np.mean(loss) if len(loss) > 0 else 0
+            
+            if avg_loss > 1e-8:
+                rs = avg_gain / avg_loss
+                rsi = 100 - (100 / (1 + rs))
+            else:
+                rsi = 100 if avg_gain > 0 else 50
+        else:
+            rsi = 50
+        eng.append(rsi)
+        
+        # 7. Short interest to shares outstanding ratio
+        shares_outstanding = data[t, 66]
+        denom = max(abs(shares_outstanding), 1e-8)
+        short_to_outstanding = data[t, 0] / denom
+        eng.append(short_to_outstanding)
+        
+        # 8. Short interest to average volume ratio
+        denom = max(abs(data[t, 1]), 1e-8)
+        short_to_volume = data[t, 0] / denom
+        eng.append(short_to_volume)
+        
+        # 9. Recent price trend (close[-1] / close[-5])
+        if len(close_prices) >= 5:
+            denom = max(abs(np.mean(close_prices[-5:])), 1e-8)
+            recent_price_trend = close_prices[-1] / denom
+        else:
+            recent_price_trend = 1.0
+        eng.append(recent_price_trend)
+        
+        # 10. OHLC price range relative to close
+        if len(close_prices) > 0:
+            last_close = close_prices[-1]
+            denom = max(abs(last_close), 1e-8)
+            last_range = (high_prices[-1] - low_prices[-1]) / denom
+        else:
+            last_range = 0
+        eng.append(last_range)
+        
+        # 11. Short volume acceleration (change in short volume)
+        if len(short_volume) >= 5:
+            recent_short_vol = np.mean(short_volume[-3:])
+            prev_short_vol = np.mean(short_volume[-6:-3])
+            denom = max(abs(prev_short_vol), 1e-8)
+            short_vol_accel = recent_short_vol / denom - 1
+        else:
+            short_vol_accel = 0
+        eng.append(short_vol_accel)
+        
+        # 12. Options implied volatility to historical volatility ratio
+        implied_vol = data[t, 65]
+        denom = max(abs(price_volatility), 1e-8)
+        iv_to_hv_ratio = implied_vol / denom
+        eng.append(iv_to_hv_ratio)
+        
+        # 13. Short cost to volatility ratio
+        short_cost = data[t, 64]
+        denom = max(abs(implied_vol), 1e-8)
+        cost_to_vol_ratio = short_cost / denom
+        eng.append(cost_to_vol_ratio)
+        
+        # 14. Bollinger Band Width (volatility measure)
+        if len(close_prices) >= 5:
+            sma = np.mean(close_prices[-5:])
+            std = np.std(close_prices[-5:])
+            denom = max(abs(sma), 1e-8)
+            bb_width = (2 * std) / denom
+        else:
+            bb_width = 0
+        eng.append(bb_width)
+        
+        # 15. Price distance from 5-day SMA
+        if len(close_prices) >= 5:
+            sma5 = np.mean(close_prices[-5:])
+            denom = max(abs(sma5), 1e-8)
+            price_sma_distance = (close_prices[-1] / denom) - 1
+        else:
+            price_sma_distance = 0
+        eng.append(price_sma_distance)
+        
+        # 16. Volume trend (recent vs previous)
+        if len(total_volume) >= 10:
+            recent_vol = np.mean(total_volume[-5:])
+            prev_vol = np.mean(total_volume[-10:-5])
+            denom = max(abs(prev_vol), 1e-8)
+            volume_trend = recent_vol / denom - 1
+        else:
+            volume_trend = 0
+        eng.append(volume_trend)
+        
+        # 17. Put-call ratio trend
+        put_call_ratio = data[t, 63]
+        eng.append(put_call_ratio)
+        
+        # 18. Short interest momentum (if we have previous data)
+        short_interest_momentum = 0
+        if t > 0:
+            prev_short_interest = data[t-1, 0]
+            denom = max(abs(prev_short_interest), 1e-8)
+            short_interest_momentum = (data[t, 0] / denom) - 1
+        eng.append(short_interest_momentum)
+        
+        # 19. Ensure we don't exceed MAX_NEW
+        if len(eng) > MAX_NEW:
+            eng = eng[:MAX_NEW]
+        
+        # Combine raw and engineered features
+        row = np.array(raw_keep + eng, dtype=np.float32)
+        
+        # Ensure consistent size
+        if row.size < MAX_TOTAL:
+            # Pad with zeros if needed
+            row = np.pad(row, (0, MAX_TOTAL - row.size), 'constant')
+        elif row.size > MAX_TOTAL:
+            # Truncate if needed
+            row = row[:MAX_TOTAL]
+        
+        features[t] = row
+    
+    # Handle NaN, inf values
+    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    return features
+```
+--------------------------------------------------
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 25)
+✅ Function executed successfully and passed validation!
+
+🔧 Applying feature selection using claude function...
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Training data shape: (106, 4, 97) -> (106, 4, 25)
+Validation data shape: (36, 4, 97) -> (36, 4, 25)
+
+==================================================
+Training Iteration 1 (claude) (SVM)
+==================================================
+Training SVM model...
+
+Iteration 1 (claude) Performance:
+MAE: 749403.0498
+RMSE: 1120620.0359
+MAPE: 5.76%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 100
+   • Important features (top 10%): 78
+   • Highly important features (top 5%): 55
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_21_t0: importance=0.0004, rank=1
+   2. Feature_17_t0: importance=0.0003, rank=2
+   3. Feature_11_t0: importance=0.0003, rank=3
+   4. Feature_20_t2: importance=0.0002, rank=4
+   5. Feature_9_t0: importance=0.0002, rank=5
+💾 Saved code for iteration 1 to iteration_codes dictionary
+📊 No significant improvement. Change: -0.08%
+
+📈 Current best MAPE: 5.68%
+🔄 Iterations without improvement: 1/5
+
+🎯 Final Evaluation on Test Set (Unseen Data)
+======================================================================
+Using train+validation data for final model training to maximize data usage
+Combined train+val data shape: (142, 4, 97)
+Test data shape: (36, 4, 97)
+
+📊 BASELINE EVALUATION (Raw Features, Train+Val → Test):
+
+==================================================
+Training Baseline Final (Raw Features) (SVM)
+==================================================
+Training SVM model...
+
+Baseline Final (Raw Features) Performance:
+MAE: 437113.1914
+RMSE: 560535.7022
+MAPE: 5.00%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 388
+   • Important features (top 10%): 208
+   • Highly important features (top 5%): 116
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_90_t3: importance=0.0002, rank=1
+   2. Feature_64_t2: importance=0.0002, rank=2
+   3. Feature_64_t3: importance=0.0002, rank=3
+   4. Feature_63_t0: importance=0.0002, rank=4
+   5. Feature_2_t2: importance=0.0001, rank=5
+   Baseline MAPE: 5.00%
+   Baseline MAE: 437113.1914
+   Baseline RMSE: 560535.7022
+
+🔧 BEST MODEL EVALUATION (Processed Features, Train+Val → Test):
+Applying best feature engineering to all data...
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 25)
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Processed train+val shape: (142, 4, 25)
+Processed test shape: (36, 4, 25)
+
+==================================================
+Training Best Model Final (Processed Features) (SVM)
+==================================================
+Training SVM model...
+
+Best Model Final (Processed Features) Performance:
+MAE: 449031.8782
+RMSE: 593008.1004
+MAPE: 5.37%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 100
+   • Important features (top 10%): 80
+   • Highly important features (top 5%): 61
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_21_t0: importance=0.0003, rank=1
+   2. Feature_17_t0: importance=0.0003, rank=2
+   3. Feature_2_t0: importance=0.0002, rank=3
+   4. Feature_6_t0: importance=0.0002, rank=4
+   5. Feature_18_t0: importance=0.0002, rank=5
+
+📊 Best Model Test Set Performance:
+   MAPE: 5.37%
+   MAE: 449031.8782
+   RMSE: 593008.1004
+
+🎯 IMPROVEMENT OVER BASELINE:
+   Baseline MAPE: 5.00%
+   Best Model MAPE: 5.37%
+   Absolute Improvement: -0.37%
+   Relative Improvement: -7.4%
+
+======================================================================
+ITERATION PERFORMANCE SUMMARY
+======================================================================
+
+📊 VALIDATION MAPE TREND:
+--------------------------------------------------------------------------------
+Iteration  Model                     Validation MAPE Improvement from Last
+--------------------------------------------------------------------------------
+0          Baseline                  5.68            N/A                 
+1          Iteration 1               5.76            -0.08%              
+--------------------------------------------------------------------------------
+🏆 Best: Iteration 1 - MAPE: 5.76%
+✅ Saved SLG results to cache/SLG_iterative_results_enhanced.pkl
+✅ Summary report saved for SLG
+
+🎉 Process completed successfully for SLG!
+
+================================================================================
+PROCESSING TICKER 2/2: ABM
+================================================================================
+🚀 Starting Iterative Agent-Based Feature Selection Process for ABM
+======================================================================
+📊 Loading data from parquet file...
+📊 Loading data for ABM from parquet file...
+Loading parquet file: ../data/price_data_multiindex_20250904_113138.parquet
+Parquet file loaded. Shape: (6499, 46544)
+Date range: 1999-11-01 00:00:00 to 2025-09-03 00:00:00
+SI dates range: 2017-12-29 00:00:00 to 2025-07-15 00:00:00
+Number of SI observations: 182
+Extracting OHLC data for ABM...
+Retrieved price data for 1918 trading days
+Price data date range: 2017-11-29 00:00:00 to 2025-07-18 00:00:00
+Creating price features with 15 days lookback...
+Price features shape: (182, 60)
+Retrieved short volume data for 1916 days
+Short volume data date range: 2017-12-01 00:00:00 to 2025-07-18 00:00:00
+Creating short volume features with 15 days lookback...
+Short volume features shape: (182, 30)
+Combined features shape without short volume: (182, 97)
+Training data shape: (106, 4, 97)
+Validation data shape: (36, 4, 97)
+Test data shape: (36, 4, 97)
+✅ Data integrity validation passed
+✅ Data loaded successfully!
+Training data shape: (106, 4, 97)
+Validation data shape: (36, 4, 97)
+Test data shape: (36, 4, 97)
+Features per timestep: 97
+Lookback window: 4
+
+🎯 Step 1: Running baseline model on validation set...
+
+==================================================
+Training Baseline (All 97 Features) (SVM)
+==================================================
+Training SVM model...
+
+Baseline (All 97 Features) Performance:
+MAE: 211435.4276
+RMSE: 268102.6762
+MAPE: 15.91%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 388
+   • Important features (top 10%): 249
+   • Highly important features (top 5%): 133
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_65_t2: importance=0.0004, rank=1
+   2. Feature_63_t2: importance=0.0003, rank=2
+   3. Feature_63_t0: importance=0.0002, rank=3
+   4. Feature_79_t3: importance=0.0002, rank=4
+   5. Feature_84_t1: importance=0.0002, rank=5
+
+📊 Baseline Performance: MAPE = 15.91%
+
+🔄 Starting iterative improvement process...
+Max iterations: 1
+Min improvement threshold: 0.1%
+Patience: 5 iterations without improvement
+
+======================================================================
+ITERATION 1
+======================================================================
+🤖 Calling Claude for iteration 1...
+✅ Claude response received!
+
+📝 Claude's Response:
+--------------------------------------------------
+```python
+def construct_features(data):
+    RAW_DIM = 97
+    MAX_TOTAL = 25
+    
+    lookback_window = data.shape[0]
+    features = np.zeros((lookback_window, MAX_TOTAL), dtype=np.float32)
+    
+    for t in range(lookback_window):
+        # Start with essential raw features we want to keep
+        raw_keep = [
+            data[t, 0],  # short interest
+            data[t, 1],  # average daily volume
+            data[t, 2],  # days to cover
+            data[t, 63], # options_put_call_volume_ratio (high importance from baseline)
+            data[t, 65], # options_avg_implied_volatility (highest importance from baseline)
+        ]
+        
+        # Extract OHLC data for the past 15 days
+        ohlc = data[t, 3:63].reshape(15, 4)
+        open_prices, high_prices, low_prices, close_prices = ohlc[:, 0], ohlc[:, 1], ohlc[:, 2], ohlc[:, 3]
+        
+        # Extract short interest volume and total trading volume
+        short_volume = data[t, 67:82]
+        total_volume = data[t, 82:97]
+        
+        # Calculate MAX_NEW based on raw features kept
+        MAX_NEW = MAX_TOTAL - len(raw_keep)
+        
+        # Initialize engineered features list
+        eng = []
+        
+        # 1. Recent price trend: last 5-day return
+        if len(close_prices) >= 5:
+            recent_return = (close_prices[-1] / close_prices[-5] - 1) if close_prices[-5] != 0 else 0
+            eng.append(recent_return)
+        else:
+            eng.append(0)
+            
+        # 2. Volatility: normalized price range over last 10 days
+        if len(close_prices) >= 10:
+            price_range = (np.max(high_prices[-10:]) - np.min(low_prices[-10:])) 
+            avg_price = np.mean(close_prices[-10:])
+            den = max(abs(avg_price), 1e-8)
+            normalized_range = price_range / den
+            eng.append(normalized_range)
+        else:
+            eng.append(0)
+            
+        # 3. Short volume ratio: average of daily short volume / total volume
+        if len(short_volume) > 0 and len(total_volume) > 0:
+            # Avoid division by zero
+            valid_indices = total_volume > 1e-8
+            if np.any(valid_indices):
+                short_ratio = np.mean(short_volume[valid_indices] / total_volume[valid_indices])
+                eng.append(short_ratio)
+            else:
+                eng.append(0)
+        else:
+            eng.append(0)
+            
+        # 4. Short volume trend: 5-day vs 15-day
+        if len(short_volume) >= 15:
+            short_vol_5d = np.mean(short_volume[-5:])
+            short_vol_15d = np.mean(short_volume)
+            den = max(abs(short_vol_15d), 1e-8)
+            short_vol_ratio = short_vol_5d / den
+            eng.append(short_vol_ratio)
+        else:
+            eng.append(0)
+            
+        # 5. RSI (Relative Strength Index) - momentum indicator
+        if len(close_prices) >= 14:
+            delta = np.diff(close_prices)
+            gain = np.where(delta > 0, delta, 0)
+            loss = np.where(delta < 0, -delta, 0)
+            avg_gain = np.mean(gain)
+            avg_loss = np.mean(loss)
+            den = max(abs(avg_loss), 1e-8)
+            rs = avg_gain / den
+            rsi = 100 - (100 / (1 + rs))
+            eng.append(rsi)
+        else:
+            eng.append(0)
+            
+        # 6. Price momentum: 10-day rate of change
+        if len(close_prices) >= 10:
+            den = max(abs(close_prices[-10]), 1e-8)
+            momentum = (close_prices[-1] / den - 1) * 100
+            eng.append(momentum)
+        else:
+            eng.append(0)
+            
+        # 7. Short interest to shares outstanding ratio
+        shares_outstanding = data[t, 66]
+        short_interest = data[t, 0]
+        den = max(abs(shares_outstanding), 1e-8)
+        short_to_float_ratio = short_interest / den
+        eng.append(short_to_float_ratio)
+        
+        # 8. Short interest growth rate (if we have previous data)
+        if t > 0 and data[t-1, 0] != 0:
+            den = max(abs(data[t-1, 0]), 1e-8)
+            si_growth = (data[t, 0] / den - 1) * 100
+            eng.append(si_growth)
+        else:
+            eng.append(0)
+            
+        # 9. Options synthetic short cost to implied volatility ratio
+        options_synthetic_short_cost = data[t, 64]
+        options_avg_implied_volatility = data[t, 65]
+        den = max(abs(options_avg_implied_volatility), 1e-8)
+        cost_to_vol_ratio = options_synthetic_short_cost / den
+        eng.append(cost_to_vol_ratio)
+        
+        # 10. VWAP (Volume Weighted Average Price) of last 5 days
+        if len(close_prices) >= 5 and len(total_volume) >= 5:
+            vwap_numerator = np.sum(close_prices[-5:] * total_volume[-5:])
+            vwap_denominator = np.sum(total_volume[-5:])
+            den = max(abs(vwap_denominator), 1e-8)
+            vwap = vwap_numerator / den
+            # Price deviation from VWAP
+            den = max(abs(vwap), 1e-8)
+            vwap_deviation = (close_prices[-1] / den - 1) * 100
+            eng.append(vwap_deviation)
+        else:
+            eng.append(0)
+            
+        # 11. Bollinger Band Width (volatility measure)
+        if len(close_prices) >= 10:
+            sma = np.mean(close_prices[-10:])
+            std = np.std(close_prices[-10:])
+            den = max(abs(sma), 1e-8)
+            bb_width = (2 * std) / den
+            eng.append(bb_width)
+        else:
+            eng.append(0)
+            
+        # 12. Average True Range (ATR) - volatility indicator
+        if len(open_prices) >= 10:
+            tr_values = []
+            for i in range(1, 10):
+                high_low = high_prices[-i] - low_prices[-i]
+                high_close = abs(high_prices[-i] - close_prices[-(i+1)])
+                low_close = abs(low_prices[-i] - close_prices[-(i+1)])
+                tr = max(high_low, high_close, low_close)
+                tr_values.append(tr)
+            atr = np.mean(tr_values)
+            # Normalize ATR by price
+            den = max(abs(close_prices[-1]), 1e-8)
+            normalized_atr = atr / den
+            eng.append(normalized_atr)
+        else:
+            eng.append(0)
+            
+        # 13. Short volume acceleration (rate of change in short volume)
+        if len(short_volume) >= 10:
+            short_vol_5d_recent = np.mean(short_volume[-5:])
+            short_vol_5d_earlier = np.mean(short_volume[-10:-5])
+            den = max(abs(short_vol_5d_earlier), 1e-8)
+            short_vol_accel = (short_vol_5d_recent / den - 1) * 100
+            eng.append(short_vol_accel)
+        else:
+            eng.append(0)
+            
+        # 14. Options put/call ratio trend
+        if t > 0:
+            put_call_trend = data[t, 63] - data[t-1, 63]
+            eng.append(put_call_trend)
+        else:
+            eng.append(0)
+            
+        # 15. Price gap: difference between consecutive day closes
+        if len(close_prices) >= 2:
+            den = max(abs(close_prices[-2]), 1e-8)
+            price_gap = (close_prices[-1] / den - 1) * 100
+            eng.append(price_gap)
+        else:
+            eng.append(0)
+            
+        # 16. Volume surge: recent volume vs historical
+        if len(total_volume) >= 10:
+            recent_vol = np.mean(total_volume[-3:])
+            historical_vol = np.mean(total_volume[-10:-3])
+            den = max(abs(historical_vol), 1e-8)
+            volume_surge = recent_vol / den
+            eng.append(volume_surge)
+        else:
+            eng.append(0)
+            
+        # 17. Short interest to average volume ratio
+        avg_volume = data[t, 1]
+        den = max(abs(avg_volume), 1e-8)
+        si_to_avg_vol = short_interest / den
+        eng.append(si_to_avg_vol)
+            
+        # 18. Last day's close price (normalized)
+        if len(close_prices) > 0:
+            # Normalize by 10-day average if available
+            if len(close_prices) >= 10:
+                den = max(abs(np.mean(close_prices[-10:])), 1e-8)
+                norm_close = close_prices[-1] / den
+            else:
+                norm_close = close_prices[-1]
+            eng.append(norm_close)
+        else:
+            eng.append(0)
+            
+        # 19. Last day's trading range (high-low) / close
+        if len(close_prices) > 0 and len(high_prices) > 0 and len(low_prices) > 0:
+            den = max(abs(close_prices[-1]), 1e-8)
+            day_range = (high_prices[-1] - low_prices[-1]) / den
+            eng.append(day_range)
+        else:
+            eng.append(0)
+            
+        # 20. Combine features: short interest growth * put/call ratio
+        if t > 0 and data[t-1, 0] != 0:
+            den = max(abs(data[t-1, 0]), 1e-8)
+            si_growth_val = (data[t, 0] / den - 1)
+            combined = si_growth_val * data[t, 63]
+            eng.append(combined)
+        else:
+            eng.append(0)
+        
+        # Ensure we don't exceed MAX_NEW
+        if len(eng) > MAX_NEW:
+            eng = eng[:MAX_NEW]
+            
+        # Combine raw and engineered features
+        row = np.array(raw_keep + eng, dtype=np.float32)
+        
+        # Ensure consistent width
+        if row.size < MAX_TOTAL:
+            # Pad with zeros if needed
+            row = np.pad(row, (0, MAX_TOTAL - row.size), 'constant')
+        elif row.size > MAX_TOTAL:
+            # Truncate if needed
+            row = row[:MAX_TOTAL]
+            
+        features[t] = row
+    
+    # Handle NaN, inf values
+    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    return features
+```
+--------------------------------------------------
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 25)
+✅ Function executed successfully and passed validation!
+
+🔧 Applying feature selection using claude function...
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Training data shape: (106, 4, 97) -> (106, 4, 25)
+Validation data shape: (36, 4, 97) -> (36, 4, 25)
+
+==================================================
+Training Iteration 1 (claude) (SVM)
+==================================================
+Training SVM model...
+
+Iteration 1 (claude) Performance:
+MAE: 192141.8406
+RMSE: 236238.3375
+MAPE: 14.49%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 100
+   • Important features (top 10%): 88
+   • Highly important features (top 5%): 68
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_23_t2: importance=0.0008, rank=1
+   2. Feature_4_t2: importance=0.0006, rank=2
+   3. Feature_14_t2: importance=0.0005, rank=3
+   4. Feature_24_t2: importance=0.0005, rank=4
+   5. Feature_17_t3: importance=0.0005, rank=5
+💾 Saved code for iteration 1 to iteration_codes dictionary
+🎉 IMPROVEMENT! MAPE improved by 1.42%
+
+📈 Current best MAPE: 14.49%
+🔄 Iterations without improvement: 0/5
+
+🎯 Final Evaluation on Test Set (Unseen Data)
+======================================================================
+Using train+validation data for final model training to maximize data usage
+Combined train+val data shape: (142, 4, 97)
+Test data shape: (36, 4, 97)
+
+📊 BASELINE EVALUATION (Raw Features, Train+Val → Test):
+
+==================================================
+Training Baseline Final (Raw Features) (SVM)
+==================================================
+Training SVM model...
+
+Baseline Final (Raw Features) Performance:
+MAE: 243256.9853
+RMSE: 309317.1754
+MAPE: 14.65%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 388
+   • Important features (top 10%): 290
+   • Highly important features (top 5%): 125
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_71_t0: importance=0.0003, rank=1
+   2. Feature_69_t1: importance=0.0003, rank=2
+   3. Feature_63_t2: importance=0.0003, rank=3
+   4. Feature_86_t2: importance=0.0003, rank=4
+   5. Feature_84_t1: importance=0.0003, rank=5
+   Baseline MAPE: 14.65%
+   Baseline MAE: 243256.9853
+   Baseline RMSE: 309317.1754
+
+🔧 BEST MODEL EVALUATION (Processed Features, Train+Val → Test):
+Applying best feature engineering to all data...
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 25)
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Processed train+val shape: (142, 4, 25)
+Processed test shape: (36, 4, 25)
+
+==================================================
+Training Best Model Final (Processed Features) (SVM)
+==================================================
+Training SVM model...
+
+Best Model Final (Processed Features) Performance:
+MAE: 264520.5138
+RMSE: 333523.8631
+MAPE: 15.47%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 100
+   • Important features (top 10%): 95
+   • Highly important features (top 5%): 81
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_12_t3: importance=0.0010, rank=1
+   2. Feature_7_t1: importance=0.0006, rank=2
+   3. Feature_12_t2: importance=0.0005, rank=3
+   4. Feature_3_t2: importance=0.0005, rank=4
+   5. Feature_10_t3: importance=0.0005, rank=5
+
+📊 Best Model Test Set Performance:
+   MAPE: 15.47%
+   MAE: 264520.5138
+   RMSE: 333523.8631
+
+🎯 IMPROVEMENT OVER BASELINE:
+   Baseline MAPE: 14.65%
+   Best Model MAPE: 15.47%
+   Absolute Improvement: -0.82%
+   Relative Improvement: -5.6%
+
+======================================================================
+ITERATION PERFORMANCE SUMMARY
+======================================================================
+
+📊 VALIDATION MAPE TREND:
+--------------------------------------------------------------------------------
+Iteration  Model                     Validation MAPE Improvement from Last
+--------------------------------------------------------------------------------
+0          Baseline                  15.91           N/A                 
+1          Iteration 1               14.49           +1.42%              
+--------------------------------------------------------------------------------
+🏆 Best: Iteration 1 - MAPE: 14.49%
+✅ Saved ABM results to cache/ABM_iterative_results_enhanced.pkl
+✅ Summary report saved for ABM
+
+🎉 Process completed successfully for ABM!
+
+================================================================================
+GENERATING UNIVERSAL FEATURE ENGINEERING CODE
+================================================================================
+Successfully processed 2 tickers: SLG, ABM
+
+🤖 Calling Claude to generate universal feature engineering code...
+✅ Universal function validation passed! Output shape: (4, 25)
+✅ Universal code generated and validated successfully!
+✅ Universal code response received!
+
+📝 Claude's Universal Feature Engineering Code:
+------------------------------------------------------------
+```python
+def construct_features(data):
+    RAW_DIM = 97
+    MAX_TOTAL = 25
+    
+    lookback_window = data.shape[0]
+    features = np.zeros((lookback_window, MAX_TOTAL), dtype=np.float32)
+    
+    for t in range(lookback_window):
+        # Start with essential raw features to keep
+        raw_keep = [
+            data[t, 0],  # short interest
+            data[t, 1],  # average daily volume
+            data[t, 2],  # days to cover
+            data[t, 63],  # options_put_call_volume_ratio
+            data[t, 65],  # options_avg_implied_volatility
+        ]
+        
+        # Extract OHLC data for the past 15 days
+        ohlc = data[t, 3:63].reshape(15, 4)
+        open_prices, high_prices, low_prices, close_prices = ohlc[:, 0], ohlc[:, 1], ohlc[:, 2], ohlc[:, 3]
+        
+        # Extract short interest volume and total trading volume
+        short_volume = data[t, 67:82]
+        total_volume = data[t, 82:97]
+        shares_outstanding = data[t, 66]
+        options_synthetic_short_cost = data[t, 64]
+        
+        # Calculate MAX_NEW based on raw features kept
+        MAX_NEW = MAX_TOTAL - len(raw_keep)
+        
+        # Initialize engineered features list
+        eng = []
+        
+        # 1. Short Volume Ratio (daily short volume / total volume)
+        short_volume_ratio = np.zeros_like(short_volume)
+        for i in range(len(short_volume)):
+            denom = max(abs(total_volume[i]), 1e-8)
+            short_volume_ratio[i] = short_volume[i] / denom
+        
+        avg_short_volume_ratio = np.mean(short_volume_ratio)
+        eng.append(avg_short_volume_ratio)
+        
+        # 2. Recent trend in short volume ratio (last 5 days vs previous 10)
+        if len(short_volume_ratio) >= 10:
+            recent_svr = np.mean(short_volume_ratio[-5:])
+            previous_svr = np.mean(short_volume_ratio[:-5])
+            denom = max(abs(previous_svr), 1e-8)
+            svr_trend = recent_svr / denom - 1
+            eng.append(svr_trend)
+        else:
+            eng.append(0)
+        
+        # 3. Price momentum (5-day)
+        if len(close_prices) >= 5:
+            price_momentum_5d = close_prices[-1] / max(abs(close_prices[-5]), 1e-8) - 1
+            eng.append(price_momentum_5d)
+        else:
+            eng.append(0)
+        
+        # 4. Price volatility (standard deviation of returns)
+        if len(close_prices) >= 2:
+            returns = np.diff(close_prices) / np.maximum(close_prices[:-1], 1e-8)
+            price_volatility = np.std(returns) if len(returns) > 0 else 0
+            eng.append(price_volatility)
+        else:
+            eng.append(0)
+        
+        # 5. RSI (Relative Strength Index)
+        if len(close_prices) >= 3:
+            delta = np.diff(close_prices)
+            gain = np.where(delta > 0, delta, 0)
+            loss = np.where(delta < 0, -delta, 0)
+            avg_gain = np.mean(gain) if len(gain) > 0 else 0
+            avg_loss = np.mean(loss) if len(loss) > 0 else 0
+            
+            if avg_loss > 1e-8:
+                rs = avg_gain / avg_loss
+                rsi = 100 - (100 / (1 + rs))
+            else:
+                rsi = 100 if avg_gain > 0 else 50
+            eng.append(rsi)
+        else:
+            eng.append(50)
+        
+        # 6. Short interest to shares outstanding ratio
+        denom = max(abs(shares_outstanding), 1e-8)
+        short_to_outstanding = data[t, 0] / denom
+        eng.append(short_to_outstanding)
+        
+        # 7. Short interest to average volume ratio
+        denom = max(abs(data[t, 1]), 1e-8)
+        short_to_volume = data[t, 0] / denom
+        eng.append(short_to_volume)
+        
+        # 8. OHLC price range relative to close
+        if len(close_prices) > 0:
+            last_close = close_prices[-1]
+            denom = max(abs(last_close), 1e-8)
+            last_range = (high_prices[-1] - low_prices[-1]) / denom
+            eng.append(last_range)
+        else:
+            eng.append(0)
+        
+        # 9. Short volume acceleration (change in short volume)
+        if len(short_volume) >= 6:
+            recent_short_vol = np.mean(short_volume[-3:])
+            prev_short_vol = np.mean(short_volume[-6:-3])
+            denom = max(abs(prev_short_vol), 1e-8)
+            short_vol_accel = recent_short_vol / denom - 1
+            eng.append(short_vol_accel)
+        else:
+            eng.append(0)
+        
+        # 10. Options implied volatility to historical volatility ratio
+        implied_vol = data[t, 65]
+        denom = max(abs(price_volatility), 1e-8)
+        iv_to_hv_ratio = implied_vol / denom
+        eng.append(iv_to_hv_ratio)
+        
+        # 11. Short cost to volatility ratio
+        denom = max(abs(implied_vol), 1e-8)
+        cost_to_vol_ratio = options_synthetic_short_cost / denom
+        eng.append(cost_to_vol_ratio)
+        
+        # 12. Bollinger Band Width (volatility measure)
+        if len(close_prices) >= 10:
+            sma = np.mean(close_prices[-10:])
+            std = np.std(close_prices[-10:])
+            denom = max(abs(sma), 1e-8)
+            bb_width = (2 * std) / denom
+            eng.append(bb_width)
+        else:
+            eng.append(0)
+        
+        # 13. Volume trend (recent vs previous)
+        if len(total_volume) >= 10:
+            recent_vol = np.mean(total_volume[-5:])
+            prev_vol = np.mean(total_volume[-10:-5])
+            denom = max(abs(prev_vol), 1e-8)
+            volume_trend = recent_vol / denom - 1
+            eng.append(volume_trend)
+        else:
+            eng.append(0)
+        
+        # 14. Short interest momentum (if we have previous data)
+        short_interest_momentum = 0
+        if t > 0:
+            prev_short_interest = data[t-1, 0]
+            denom = max(abs(prev_short_interest), 1e-8)
+            short_interest_momentum = (data[t, 0] / denom) - 1
+        eng.append(short_interest_momentum)
+        
+        # 15. Average True Range (ATR) - volatility indicator
+        tr_values = []
+        for i in range(1, len(close_prices)):
+            high_low = high_prices[i] - low_prices[i]
+            high_close_prev = abs(high_prices[i] - close_prices[i-1])
+            low_close_prev = abs(low_prices[i] - close_prices[i-1])
+            tr = max(high_low, high_close_prev, low_close_prev)
+            tr_values.append(tr)
+        
+        if tr_values:
+            atr = np.mean(tr_values)
+            # Normalize ATR by price
+            denom = max(abs(close_prices[-1]), 1e-8)
+            normalized_atr = atr / denom
+            eng.append(normalized_atr)
+        else:
+            eng.append(0)
+        
+        # 16. Options put/call ratio trend
+        if t > 0:
+            put_call_trend = data[t, 63] - data[t-1, 63]
+            eng.append(put_call_trend)
+        else:
+            eng.append(0)
+        
+        # 17. VWAP deviation
+        if len(close_prices) >= 5 and len(total_volume) >= 5:
+            vwap_numerator = np.sum(close_prices[-5:] * total_volume[-5:])
+            vwap_denominator = np.sum(total_volume[-5:])
+            denom = max(abs(vwap_denominator), 1e-8)
+            vwap = vwap_numerator / denom
+            # Price deviation from VWAP
+            denom = max(abs(vwap), 1e-8)
+            vwap_deviation = (close_prices[-1] / denom - 1) * 100
+            eng.append(vwap_deviation)
+        else:
+            eng.append(0)
+        
+        # 18. Combine features: short interest growth * put/call ratio
+        if t > 0 and data[t-1, 0] != 0:
+            denom = max(abs(data[t-1, 0]), 1e-8)
+            si_growth_val = (data[t, 0] / denom - 1)
+            combined = si_growth_val * data[t, 63]
+            eng.append(combined)
+        else:
+            eng.append(0)
+        
+        # 19. Price gap: difference between consecutive day closes
+        if len(close_prices) >= 2:
+            denom = max(abs(close_prices[-2]), 1e-8)
+            price_gap = (close_prices[-1] / denom - 1) * 100
+            eng.append(price_gap)
+        else:
+            eng.append(0)
+        
+        # 20. Volume surge: recent volume vs historical
+        if len(total_volume) >= 10:
+            recent_vol = np.mean(total_volume[-3:])
+            historical_vol = np.mean(total_volume[-10:-3])
+            denom = max(abs(historical_vol), 1e-8)
+            volume_surge = recent_vol / denom
+            eng.append(volume_surge)
+        else:
+            eng.append(0)
+        
+        # Ensure we don't exceed MAX_NEW
+        if len(eng) > MAX_NEW:
+            eng = eng[:MAX_NEW]
+        
+        # Combine raw and engineered features
+        row = np.array(raw_keep + eng, dtype=np.float32)
+        
+        # Ensure consistent size
+        if row.size < MAX_TOTAL:
+            # Pad with zeros if needed
+            row = np.pad(row, (0, MAX_TOTAL - row.size), 'constant')
+        elif row.size > MAX_TOTAL:
+            # Truncate if needed
+            row = row[:MAX_TOTAL]
+        
+        features[t] = row
+    
+    # Handle NaN, inf values
+    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    return features
+```
+------------------------------------------------------------
+✅ Successfully Extracted Function Code!
+Test output shape: (4, 25)
+✅ Universal function extracted and validated successfully!
+💾 Universal code saved to: cache/universal_feature_engineering_code.py
+💾 Comprehensive results saved to: cache/comprehensive_multi_ticker_results.pkl
+
+================================================================================
+ITERATIVE PROCESS SUMMARY
+================================================================================
+
+SLG:
+  Best MAPE: 5.76%
+  Improvement: -0.08%
+  Feature count: 25
+  Iterations: 1
+
+ABM:
+  Best MAPE: 14.49%
+  Improvement: 1.42%
+  Feature count: 25
+  Iterations: 1
+
+================================================================================
+STARTING VALIDATION PHASE
+================================================================================
+Testing universal feature engineering on all available tickers...
+
+================================================================================
+TESTING UNIVERSAL FEATURE ENGINEERING ON MULTIPLE TICKERS
+================================================================================
+Testing on 2 tickers: TSLA, PFE
+
+============================================================
+TESTING TICKER 1/2: TSLA
+============================================================
+📊 Loading data for TSLA...
+📊 Loading data for TSLA from parquet file...
+Loading parquet file: ../data/price_data_multiindex_20250904_113138.parquet
+Parquet file loaded. Shape: (6499, 46544)
+Date range: 1999-11-01 00:00:00 to 2025-09-03 00:00:00
+SI dates range: 2017-12-29 00:00:00 to 2025-07-15 00:00:00
+Number of SI observations: 182
+Extracting OHLC data for TSLA...
+Retrieved price data for 1918 trading days
+Price data date range: 2017-11-29 00:00:00 to 2025-07-18 00:00:00
+Creating price features with 15 days lookback...
+Price features shape: (182, 60)
+Error: Ticker 'TSLA' not found in short volume data.
+Retrieved short volume data for 0 days
+Creating short volume features with 15 days lookback...
+No short volume data available, creating zero features
+Short volume features shape: (182, 30)
+Combined features shape without short volume: (182, 97)
+Training data shape: (106, 4, 97)
+Validation data shape: (36, 4, 97)
+Test data shape: (36, 4, 97)
+✅ Data loaded: Train+Val=(142, 4, 97), Test=(36, 4, 97)
+
+🎯 Training baseline model for TSLA...
+
+==================================================
+Training Baseline TSLA (SVM)
+==================================================
+Training SVM model...
+
+Baseline TSLA Performance:
+MAE: 4759311.7538
+RMSE: 6029621.6329
+MAPE: 5.74%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 388
+   • Important features (top 10%): 223
+   • Highly important features (top 5%): 184
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_64_t3: importance=0.0011, rank=1
+   2. Feature_65_t1: importance=0.0010, rank=2
+   3. Feature_7_t1: importance=0.0007, rank=3
+   4. Feature_5_t3: importance=0.0006, rank=4
+   5. Feature_64_t1: importance=0.0006, rank=5
+
+🔧 Applying universal feature engineering for TSLA...
+✅ Claude API client initialized successfully!
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Feature engineering: (142, 4, 97) -> (142, 4, 25)
+
+🚀 Training enhanced model for TSLA...
+
+==================================================
+Training Enhanced TSLA (SVM)
+==================================================
+Training SVM model...
+
+Enhanced TSLA Performance:
+MAE: 4706263.3697
+RMSE: 6162235.7037
+MAPE: 5.83%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 100
+   • Important features (top 10%): 49
+   • Highly important features (top 5%): 34
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_19_t1: importance=0.0025, rank=1
+   2. Feature_15_t3: importance=0.0022, rank=2
+   3. Feature_15_t0: importance=0.0022, rank=3
+   4. Feature_23_t0: importance=0.0021, rank=4
+   5. Feature_23_t1: importance=0.0020, rank=5
+
+📊 TSLA Results:
+  Baseline MAPE: 5.74%
+  Enhanced MAPE: 5.83%
+  MAPE Improvement: -0.09% (-1.5%)
+  Features: 97 -> 25
+
+============================================================
+TESTING TICKER 2/2: PFE
+============================================================
+📊 Loading data for PFE...
+📊 Loading data for PFE from parquet file...
+Loading parquet file: ../data/price_data_multiindex_20250904_113138.parquet
+Parquet file loaded. Shape: (6499, 46544)
+Date range: 1999-11-01 00:00:00 to 2025-09-03 00:00:00
+SI dates range: 2017-12-29 00:00:00 to 2025-07-15 00:00:00
+Number of SI observations: 182
+Extracting OHLC data for PFE...
+Retrieved price data for 1918 trading days
+Price data date range: 2017-11-29 00:00:00 to 2025-07-18 00:00:00
+Creating price features with 15 days lookback...
+Price features shape: (182, 60)
+Error: Ticker 'PFE' not found in short volume data.
+Retrieved short volume data for 0 days
+Creating short volume features with 15 days lookback...
+No short volume data available, creating zero features
+Short volume features shape: (182, 30)
+Combined features shape without short volume: (182, 97)
+Training data shape: (106, 4, 97)
+Validation data shape: (36, 4, 97)
+Test data shape: (36, 4, 97)
+✅ Data loaded: Train+Val=(142, 4, 97), Test=(36, 4, 97)
+
+🎯 Training baseline model for PFE...
+
+==================================================
+Training Baseline PFE (SVM)
+==================================================
+Training SVM model...
+
+Baseline PFE Performance:
+MAE: 8300852.4465
+RMSE: 10470526.3114
+MAPE: 10.01%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 388
+   • Important features (top 10%): 58
+   • Highly important features (top 5%): 30
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_0_t3: importance=0.0024, rank=1
+   2. Feature_0_t2: importance=0.0018, rank=2
+   3. Feature_2_t3: importance=0.0014, rank=3
+   4. Feature_63_t0: importance=0.0005, rank=4
+   5. Feature_2_t0: importance=0.0004, rank=5
+
+🔧 Applying universal feature engineering for PFE...
+✅ Claude API client initialized successfully!
+✅ Feature selection applied successfully on attempt 1
+✅ Feature selection applied successfully on attempt 1
+Feature engineering: (142, 4, 97) -> (142, 4, 25)
+
+🚀 Training enhanced model for PFE...
+
+==================================================
+Training Enhanced PFE (SVM)
+==================================================
+Training SVM model...
+
+Enhanced PFE Performance:
+MAE: 8196349.2871
+RMSE: 10636091.7370
+MAPE: 9.91%
+
+📊 Calculating SVM feature importance...
+📈 SVM Feature Importance Analysis:
+   • Total features: 100
+   • Important features (top 10%): 65
+   • Highly important features (top 5%): 53
+
+🔍 TOP 5 MOST IMPORTANT FEATURES:
+   1. Feature_14_t1: importance=0.0017, rank=1
+   2. Feature_11_t3: importance=0.0013, rank=2
+   3. Feature_4_t2: importance=0.0012, rank=3
+   4. Feature_9_t2: importance=0.0012, rank=4
+   5. Feature_4_t3: importance=0.0010, rank=5
+
+📊 PFE Results:
+  Baseline MAPE: 10.01%
+  Enhanced MAPE: 9.91%
+  MAPE Improvement: +0.11% (+1.1%)
+  Features: 97 -> 25
+
+================================================================================
+UNIVERSAL FEATURE ENGINEERING PERFORMANCE REPORT
+================================================================================
+
+📊 SUMMARY STATISTICS:
+  Total tickers tested: 2
+  Successful tests: 2
+  Failed tests: 0
+
+🎯 MAPE IMPROVEMENT STATISTICS:
+  Average MAPE improvement: 0.01%
+  Median MAPE improvement: 0.01%
+  Std deviation: 0.10%
+  Min improvement: -0.09%
+  Max improvement: 0.11%
+
+📈 RELATIVE IMPROVEMENT STATISTICS:
+  Average relative improvement: -0.2%
+  Median relative improvement: -0.2%
+  Std deviation: 1.3%
+
+🏆 IMPROVEMENT DISTRIBUTION:
+  Tickers with positive improvement: 1/2 (50.0%)
+  Tickers with >0.5% improvement: 0/2 (0.0%)
+
+📋 DETAILED RESULTS:
+----------------------------------------------------------------------------------------------------
+Ticker   Baseline MAPE Enhanced MAPE Improvement  Rel. Imp.  Features    
+----------------------------------------------------------------------------------------------------
+TSLA     5.74         5.83          -0.09        -1.5       97->25
+PFE      10.01        9.91          0.11         1.1        97->25
+----------------------------------------------------------------------------------------------------
+
+💾 Detailed report saved to: cache/universal_feature_engineering_validation_report.txt
+💾 Validation results saved to: cache/universal_feature_engineering_validation_results.pkl
+
+🎯 VALIDATION SUMMARY:
+  Successfully tested: 2/2 tickers
+  Average MAPE improvement: 0.01%
+  Tickers with positive improvement: 1/2 (50.0%)
+  Tickers with >0.5% improvement: 0/2 (0.0%)
+
+🎉 Complete multi-ticker process completed successfully!
+Processed 2 tickers for iterative feature engineering
+Generated and validated universal feature engineering code on 2 tickers
+
+✅ SVM Multi-ticker results:
+  Processed 2 tickers for iterative engineering
+  Generated universal feature engineering function
+  Validated on 2 tickers
+
+🎉 Examples completed!
+
+To run the full pipeline:
+  python code/main.py --config development --single-ticker AAPL
+  python code/main.py --config production --tickers AAPL TSLA
+  python code/main.py --config quick_test --max-tickers 3

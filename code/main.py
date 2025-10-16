@@ -92,7 +92,7 @@ class IterativeFeatureSelectionPipeline:
         print("\n🎯 Step 1: Running baseline model on validation set...")
         baseline_results = self.model_trainer.train_and_evaluate_model(
             X_train_raw, X_val_raw, y_train, y_val, prev_log_val, 
-            model_name="Baseline (All 62 Features)", epochs=self.config.model.epochs,
+            model_name="Baseline (All 97 Features)", epochs=self.config.model.epochs,
             model_type=self.config.model.model_type
         )
         
@@ -103,7 +103,7 @@ class IterativeFeatureSelectionPipeline:
         iteration_results.append({
             'iteration': 0,
             'model_name': 'Baseline',
-            'features_used': 'All 62 original features',
+            'features_used': 'All 97 original features',
             'feature_count': X_train_raw.shape[2],
             'mape': baseline_mape,
             'mae': baseline_results['mae'],

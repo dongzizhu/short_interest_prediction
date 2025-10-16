@@ -7,6 +7,7 @@ This script demonstrates how to use the new modular architecture for different s
 import os
 import sys
 from pathlib import Path
+import pandas as pd
 
 # Add the current directory to Python path for imports
 sys.path.append(str(Path(__file__).parent))
@@ -22,10 +23,10 @@ except ImportError:
     print("   Environment variables will be loaded from system environment only.")
 
 try:
-    from .config import get_development_config, get_production_config, get_quick_test_config
+    from .config import get_development_config, get_production_config, get_quick_test_config, get_production_SVM_config, get_quick_test_SVM_config
     from .main import IterativeFeatureSelectionPipeline
 except ImportError:
-    from config import get_development_config, get_production_config, get_quick_test_config
+    from config import get_development_config, get_production_config, get_quick_test_config, get_production_SVM_config, get_quick_test_SVM_config
     from main import IterativeFeatureSelectionPipeline
 
 
@@ -104,7 +105,8 @@ def example_svm_multi_ticker():
     print("="*50)
     
     # Load development configuration for faster testing
-    config = get_production_config()
+    config = get_production_SVM_config()
+    # config = get_quick_test_SVM_config()
     config.llm.api_key = os.getenv('ANTHROPIC_API_KEY', 'your-api-key-here')
     
     # Configure SVM model
@@ -127,11 +129,31 @@ def example_svm_multi_ticker():
     pipeline = IterativeFeatureSelectionPipeline(config)
     
     # Define tickers to process (smaller set for faster testing)
-    # iterative_tickers = ['AAPL', 'TSLA']  # Single ticker for iterative feature engineering
+    # iterative_tickers = ['SLG', 'ABM']  # Single ticker for iterative feature engineering
     # validation_tickers = ['TSLA', 'PFE']  # Tickers for validation
-    iterative_tickers = ['CYRX', 'ZEUS', 'DXLG', 'SMBK', 'FCEL']  
-    validation_tickers = ['BBW', 'UNFI', 'CMPR', 'VNDA', 'LWAY', 'MEI', 'SMBK', 'HLIT', 'INBK', 'FDUS', 'MCRI', 'GNE', 'CYRX', 'BBSI', 'INVA', 'OPK', 'OCUL', 'DXLG', 'DXPE', 'AMRK', 'AXGN', 'HCKT', 'ZEUS', 'ANIP', 'IMMR', 'CLFD', 'AEHR', 'NAT', 'EXTR', 'CHEF', 'PLYM', 'PEB', 'PLCE', 'XHR', 'FBK', 'GSBC', 'GOGO', 'SENEA', 'GNK', 'QNST', 'KRO', 'MITK', 'GSBD', 'URGN', 'AVNW', 'HTLD', 'XOMA', 'UFPT', 'FCEL', 'NVAX', 'GERN', 'CSV', 'FOR']  
+    # iterative_tickers = ['CYRX', 'ZEUS', 'DXLG', 'SMBK', 'FCEL']  
+    # validation_tickers = ['BBW', 'UNFI', 'CMPR', 'VNDA', 'LWAY', 'MEI', 'SMBK', 'HLIT', 'INBK', 'FDUS', 'MCRI', 'GNE', 'CYRX', 'BBSI', 'INVA', 'OPK', 'OCUL', 'DXLG', 'DXPE', 'AMRK', 'AXGN', 'HCKT', 'ZEUS', 'ANIP', 'IMMR', 'CLFD', 'AEHR', 'NAT', 'EXTR', 'CHEF', 'PLYM', 'PEB', 'PLCE', 'XHR', 'FBK', 'GSBC', 'GOGO', 'SENEA', 'GNK', 'QNST', 'KRO', 'MITK', 'GSBD', 'URGN', 'AVNW', 'HTLD', 'XOMA', 'UFPT', 'FCEL', 'NVAX', 'GERN', 'CSV', 'FOR']  
 
+    iterative_tickers = [
+    "ABCB",  # Ameris Bancorp (Financials - Regional Banks)
+    "EIG",   # Employers Holdings, Inc. (Financials - P&C Insurance)
+    # "EYE",   # National Vision Holdings (Consumer Discretionary - Specialty Stores)
+    # "AAP",   # Advance Auto Parts, Inc. (Consumer Discretionary - Automotive Retail)
+    "FSS",   # Federal Signal Corporation (Industrials - Machinery & Transportation Equipment)
+    "ABM",   # ABM Industries, Inc. (Industrials - Environmental Services)
+    "IART",  # Integra Lifesciences Holdings (Health Care - Equipment)
+    "SRPT",  # Sarepta Therapeutics (Health Care - Biotechnology)
+    "EXTR",  # Extreme Networks, Inc. (IT - Communications Equipment)
+    "SCSC",  # ScanSource, Inc. (IT - Technology Distributors)
+    "SLG",   # SL Green Realty (Real Estate - Office REITs)
+    "HL",    # Hecla Mining (Materials - Silver)
+    "ANDE",  # The Andersons, Inc. (Consumer Staples - Food Distributors)
+    "AROC"   # Archrock, Inc. (Energy - Oil & Gas Equipment & Services)]
+    ]
+
+    ticker_names = pd.read_csv('../data/sp600_matched_with_peers.csv')
+    validation_tickers = ticker_names['Symbol'].tolist()
+    
     try:
         results = pipeline.run_multi_ticker_process(iterative_tickers, validation_tickers)
         

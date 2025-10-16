@@ -1,0 +1,136 @@
+
+You are a financial data scientist specializing in **feature engineering for short-interest prediction** on equity time series.
+
+I ran iterative feature engineering for multiple tickers and captured their best-performing codes. Please synthesize a **UNIVERSAL** feature construction function that keeps the strongest, non-redundant ideas **without** inflating feature count.
+
+## Inputs provided
+PERFORMANCE SUMMARY:
+ABCB: MAPE = 8.88%, Features = 15
+EIG: MAPE = 17.59%, Features = 15
+FSS: MAPE = 10.85%, Features = 15
+ABM: MAPE = 14.90%, Features = 15
+IART: MAPE = 10.68%, Features = 15
+SRPT: MAPE = 9.06%, Features = 15
+EXTR: MAPE = 8.00%, Features = 15
+SCSC: MAPE = 15.15%, Features = 15
+SLG: MAPE = 6.44%, Features = 15
+HL: MAPE = 11.77%, Features = 15
+ANDE: MAPE = 17.19%, Features = 15
+AROC: MAPE = 13.26%, Features = 15
+
+
+BEST CODES (by ticker):
+
+============================================================
+TICKER: ABCB
+============================================================
+Best Performance: MAPE = 8.88%
+Improvement over baseline: -0.36%
+Feature count: 15
+Significant features: 37
+
+============================================================
+TICKER: EIG
+============================================================
+Best Performance: MAPE = 17.59%
+Improvement over baseline: -1.39%
+Feature count: 15
+Significant features: 41
+
+============================================================
+TICKER: FSS
+============================================================
+Best Performance: MAPE = 10.85%
+Improvement over baseline: +1.78%
+Feature count: 15
+Significant features: 25
+
+============================================================
+TICKER: ABM
+============================================================
+Best Performance: MAPE = 14.90%
+Improvement over baseline: +0.86%
+Feature count: 15
+Significant features: 36
+
+============================================================
+TICKER: IART
+============================================================
+Best Performance: MAPE = 10.68%
+Improvement over baseline: -0.31%
+Feature count: 15
+Significant features: 32
+
+============================================================
+TICKER: SRPT
+============================================================
+Best Performance: MAPE = 9.06%
+Improvement over baseline: +0.36%
+Feature count: 15
+Significant features: 27
+
+============================================================
+TICKER: EXTR
+============================================================
+Best Performance: MAPE = 8.00%
+Improvement over baseline: -1.11%
+Feature count: 15
+Significant features: 40
+
+============================================================
+TICKER: SCSC
+============================================================
+Best Performance: MAPE = 15.15%
+Improvement over baseline: -0.26%
+Feature count: 15
+Significant features: 33
+
+============================================================
+TICKER: SLG
+============================================================
+Best Performance: MAPE = 6.44%
+Improvement over baseline: -0.96%
+Feature count: 15
+Significant features: 35
+
+============================================================
+TICKER: HL
+============================================================
+Best Performance: MAPE = 11.77%
+Improvement over baseline: -1.77%
+Feature count: 15
+Significant features: 16
+
+============================================================
+TICKER: ANDE
+============================================================
+Best Performance: MAPE = 17.19%
+Improvement over baseline: -2.29%
+Feature count: 15
+Significant features: 43
+
+============================================================
+TICKER: AROC
+============================================================
+Best Performance: MAPE = 13.26%
+Improvement over baseline: -2.78%
+Feature count: 15
+Significant features: 29
+
+
+## Data schema
+- Input to your function: a **numpy array** `data` with shape **(lookback_window, 97)** for a *single* sample.
+- Feature layout at each timestep `t`:
+  - `data[t, 0]` → **short interest** at time *T* (reported every 15 days)
+  - `data[t, 1]` → **average daily volume (past 15 days)**
+  - `data[t, 2]` → **days to cover** The number of days it would take to cover all short positions based on average daily trading volume.
+  - `data[t, 3:63]` → **OHLC** over the past 15 days, flattened as **15 days × 4 columns** in order **[O, H, L, C]**  
+    Use: `ohlc = data[t, 2:].reshape(15, 4)` → `open, high, low, close = ohlc[:,0], ohlc[:,1], ohlc[:,2], ohlc[:,3]`.
+  - `data[t, 64]` → **options_put_call_volume_ratio** The ratio of the volume of put options to call options traded on that day.
+  - `data[t, 65]` → **options_synthetic_short_cost** The cost associated with creating a synthetic short position using options.
+  - `data[t, 66]` → **options_avg_implied_volatility** The average implied volatility of options, reflecting market expectations of future stock price volatility.
+  - `data[t, 67]` → **shares_outstanding** The total number of shares of a company that are currently owned by all its shareholders, including restricted shares owned by company insiders and institutional investors.
+  - `data[t, 68:83]` → Daily short interest volume for the stock over the past 15 days, flattened as **15 days × 1 columns**. Represents the total number of shares that were sold short on each day.
+  - `data[t, 83:98]` → Daily total trading volume for the stock over the past 15 days, flattened as **15 days × 1 columns**.  Represents the total number of shares traded (buy + sell) on that trading day.
+
+Total: 3 + 60 + 4 + 30 = 97 features(dimensions) per timestamp.

@@ -2,14 +2,21 @@
 You are a financial data scientist specializing in **feature engineering for short-interest prediction** on equity time series.
 
 ## Data schema
-- Input to your function: a **numpy array** `data` with shape **(lookback_window, 62)** for a *single* sample.
+- Input to your function: a **numpy array** `data` with shape **(lookback_window, 97)** for a *single* sample.
 - Feature layout at each timestep `t`:
   - `data[t, 0]` → **short interest** at time *T* (reported every 15 days)
   - `data[t, 1]` → **average daily volume (past 15 days)**
-  - `data[t, 2:62]` → **OHLC** over the past 15 days, flattened as **15 days × 4 columns** in order **[O, H, L, C]**  
-    Use: `ohlc = data[t, 2:].reshape(15, 4)` → `open, high, low, close = ohlc[:,0], ohlc[:,1], ohlc[:,2], ohlc[:,3]`.
+  - `data[t, 2]` → **days to cover** The number of days it would take to cover all short positions based on average daily trading volume.
+  - `data[t, 3:63]` → **OHLC** over the past 15 days, flattened as **15 days × 4 columns** in order **[O, H, L, C]**  
+    Use: `ohlc = data[t, 3:].reshape(15, 4)` → `open, high, low, close = ohlc[:,0], ohlc[:,1], ohlc[:,2], ohlc[:,3]`.
+  - `data[t, 63]` → **options_put_call_volume_ratio** The ratio of the volume of put options to call options traded on that day.
+  - `data[t, 64]` → **options_synthetic_short_cost** The cost associated with creating a synthetic short position using options.
+  - `data[t, 65]` → **options_avg_implied_volatility** The average implied volatility of options, reflecting market expectations of future stock price volatility.
+  - `data[t, 66]` → **shares_outstanding** The total number of shares of a company that are currently owned by all its shareholders, including restricted shares owned by company insiders and institutional investors.
+  - `data[t, 67:82]` → Daily short interest volume for the stock over the past 15 days, flattened as **15 days × 1 columns**. Represents the total number of shares that were sold short on each day.
+  - `data[t, 82:97]` → Daily total trading volume for the stock over the past 15 days, flattened as **15 days × 1 columns**.  Represents the total number of shares traded (buy + sell) on that trading day.
 
-Total: 1 + 1 + 60 = 62 features per timestamp.
+Total: 3 + 60 + 4 + 30 = 97 features(dimensions) per timestamp.
 
 ## Dataset constraints
 - Only ~180 total samples available (very small).
@@ -20,12 +27,10 @@ Total: 1 + 1 + 60 = 62 features per timestamp.
 
 
 PERFORMANCE HISTORY:
-Iteration 0: Baseline - MAPE: 7.37%
-  Features: All 62 original features
+Iteration 0: Baseline - MAPE: 10.54%
+  Features: All 97 original features
   DL-Based Feature Importance Analysis:
-    • Top important features: Feature_6_t3 (importance=0.0009), Feature_1_t3 (importance=0.0009), Feature_35_t3 (importance=0.0007), Feature_3_t3 (importance=0.0007), Feature_0_t0 (importance=0.0006)
-
-
+    • Top important features: Feature_69_t3 (importance=0.0018), Feature_71_t3 (importance=0.0017), Feature_70_t3 (importance=0.0015), Feature_72_t3 (importance=0.0014), Feature_74_t3 (importance=0.0008)
 
 
 
@@ -34,7 +39,7 @@ Iteration 0: Baseline - MAPE: 7.37%
 
 
 CURRENT TASK (Iteration 1):
-Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 7.37%.
+Your goal is to create an improved feature engineering function that will achieve better performance than the current best MAPE of 10.54%.
 
 ### Strategy
 - Learn from previous iterations: refine or extend **high-importance** areas, drop or transform **low-importance** ones.
@@ -45,7 +50,7 @@ Your goal is to create an improved feature engineering function that will achiev
 
 ### HARD IMPLEMENTATION RULES (must follow to avoid index errors and ensure a stable shape)
 - Define constants at the top of the function:
-  - `RAW_DIM = 62`
+  - `RAW_DIM = 97`
   - `MAX_TOTAL = 25`
   - `MAX_NEW = MAX_TOTAL - 1`  # upper bound; actual new count is determined after raw selection, see below
 - **Do NOT preallocate** a fixed-width array and write with a moving `idx`.  
@@ -59,7 +64,7 @@ Your goal is to create an improved feature engineering function that will achiev
      **Never exceed this cap** when appending to `eng`.
   4) For every engineered candidate, **append to `eng`**.  
      If you hit the cap (`len(eng) == MAX_NEW`), **stop adding** more features (no exceptions).
-  5) **Never reference** engineered columns by hard-coded indices (e.g., `features[t, 62+7]` is forbidden).  
+  5) **Never reference** engineered columns by hard-coded indices (e.g., `features[t, 97+7]` is forbidden).  
      If you need a previously computed engineered value, **reuse the local variable** (e.g., `rsi_val`), not a column number.
   6) Ensure the column count is **identical for all timesteps** (no branch-induced width changes).  
      If a feature cannot be computed (e.g., insufficient points), **append a 0 placeholder** for that slot so widths remain equal.
@@ -71,9 +76,9 @@ Your goal is to create an improved feature engineering function that will achiev
 - The function must **never attempt to write past** column index `MAX_TOTAL - 1`.
 
 ### Requirements
-1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 62) and returns a numpy array of shape (lookback_window, constructed_features).
+1. Write a function called `construct_features` that takes a numpy array of shape (lookback_window, 97) and returns a numpy array of shape (lookback_window, constructed_features).
 2. The function must:
-   - **Preserve the raw features**.
+   - **Preserve the useful raw features**.
    - Add **new, diverse features** while enforcing **(kept raw + new) ≤ 25**.
    - Avoid near-duplicates: do not include multiple horizons of the same measure unless clearly distinct.
    - Use **eps clamping** for all divisions: `den = max(abs(den), 1e-8)`.

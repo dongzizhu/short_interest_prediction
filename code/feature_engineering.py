@@ -124,7 +124,7 @@ class IterativeLLMFeatureSelector:
             # Check if construct_features was successfully created
             if 'construct_features' in exec_globals and callable(exec_globals['construct_features']):
                 # Test the function with a sample input to ensure it works
-                test_input = np.random.rand(4, 62)  # Sample input with expected shape
+                test_input = np.random.rand(4, 97)  # Sample input with expected shape
                 try:
                     test_output = func(test_input)
                     if not isinstance(test_output, np.ndarray):
@@ -151,8 +151,8 @@ class IterativeLLMFeatureSelector:
     
     def fallback_construct_features(self, data: np.ndarray) -> np.ndarray:
         """Fallback feature construction function."""
-        if data.shape[1] != 62:
-            raise ValueError(f"Expected 62 features, got {data.shape[1]}")
+        if data.shape[1] != 97:
+            raise ValueError(f"Expected 97 features, got {data.shape[1]}")
         
         lookback_window = data.shape[0]
         features_per_timestep = 15
@@ -349,26 +349,212 @@ class UniversalFeatureEngineering:
         self.config = config
         self.client = anthropic.Anthropic(api_key=config.api_key)
     
+    def extract_function_from_response(self, response_text: str) -> str:
+        """Extract the construct_features function from Claude's response."""
+        lines = response_text.split('\n')
+        function_lines = []
+        in_function = False
+        indent_level = 0
+        
+        for line in lines:
+            if 'def construct_features' in line:
+                in_function = True
+                function_lines.append(line)
+                indent_level = len(line) - len(line.lstrip())
+            elif in_function:
+                if line.strip() == '':
+                    function_lines.append(line)
+                elif len(line) - len(line.lstrip()) > indent_level or line.strip() == '':
+                    function_lines.append(line)
+                else:
+                    break
+        
+        extracted_code = '\n'.join(function_lines)
+        
+        # Validate that we extracted a proper function
+        if not extracted_code.strip():
+            raise ValueError("No function code found in response")
+        
+        if 'def construct_features' not in extracted_code:
+            raise ValueError("construct_features function definition not found in extracted code")
+        
+        return extracted_code
+    
+    def execute_feature_construction_code(self, code: str) -> Callable:
+        """
+        Execute the feature construction code and return the function.
+        
+        Args:
+            code (str): The feature construction code as a string
+            
+        Returns:
+            Callable: The construct_features function if successful, None otherwise
+        """
+        try:
+            # Create a safe execution environment
+            exec_globals = {
+                # Core data science libraries
+                'np': np,
+                'pd': pd,
+                'math': math,
+                'statistics': statistics,
+                'stats': stats,
+                'StandardScaler': StandardScaler,
+                'MinMaxScaler': MinMaxScaler,
+                'mean_squared_error': mean_squared_error,
+                'mean_absolute_error': mean_absolute_error,
+                
+                # Common functions and modules
+                'datetime': datetime,
+                'time': time,
+                
+                # Built-in functions
+                '__builtins__': __builtins__
+            }
+            
+            # Execute the code
+            exec(code, exec_globals)
+            
+            # Get the function
+            if 'construct_features' in exec_globals:
+                return exec_globals['construct_features']
+            else:
+                print("❌ construct_features function not found in executed code")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error executing feature construction code: {e}")
+            return None
+    
     def create_universal_prompt(self, ticker_results: Dict[str, Tuple[Dict[str, Any], Dict[str, Any]]]) -> str:
         """Create a prompt to generate universal feature engineering code from multiple ticker results."""
         return create_universal_prompt_template(ticker_results)
     
     def call_claude_for_universal_code(self, ticker_results: Dict[str, Tuple[Dict[str, Any], Dict[str, Any]]]) -> str:
-        """Call Claude API to generate universal feature engineering code."""
+        """Call Claude API to generate universal feature engineering code with retry logic and validation."""
         prompt = self.create_universal_prompt(ticker_results)
         
         # Save the prompt for reference
         with open("prompt_universal.txt", "w", encoding="utf-8") as f:
             f.write(prompt)
         
+        max_retries = 3
+        base_delay = 1  # seconds
+        validation_errors = []
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Add error feedback to prompt if we have previous validation errors
+                current_prompt = prompt
+                if validation_errors:
+                    error_feedback = self._create_validation_error_feedback(validation_errors)
+                    current_prompt = f"{prompt}\n\n{error_feedback}"
+                
+                response = self.client.messages.create(
+                    model=self.config.model,
+                    max_tokens=8000,
+                    temperature=0.1,  # Lower temperature for more consistent synthesis
+                    messages=[{"role": "user", "content": current_prompt}]
+                )
+                
+                universal_response = response.content[0].text
+                
+                # Validate the response by extracting and testing the function
+                if self._validate_universal_code(universal_response):
+                    print("✅ Universal code generated and validated successfully!")
+                    return universal_response
+                else:
+                    # If validation fails, add to errors and retry
+                    validation_errors.append({
+                        'attempt': attempt + 1,
+                        'error_type': 'ValidationError',
+                        'error_message': 'Universal function failed validation with mock data',
+                        'code_snippet': universal_response[:200] + "..." if universal_response else "No code"
+                    })
+                    
+                    if attempt < max_retries:
+                        print(f"⚠️ Universal code validation failed on attempt {attempt + 1}. Retrying...")
+                        import time
+                        time.sleep(base_delay * (2 ** attempt))
+                        continue
+                    else:
+                        print(f"❌ Universal code validation failed after {max_retries + 1} attempts")
+                        return None
+                        
+            except Exception as e:
+                if attempt == max_retries:
+                    print(f"Error calling Claude API for universal code after {max_retries + 1} attempts: {e}")
+                    return None
+                else:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay} seconds...")
+                    import time
+                    time.sleep(delay)
+    
+    def _validate_universal_code(self, universal_response: str) -> bool:
+        """Validate the universal code by extracting and testing it with mock data."""
         try:
-            response = self.client.messages.create(
-                model=self.config.model,
-                max_tokens=8000,
-                temperature=0.1,  # Lower temperature for more consistent synthesis
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return response.content[0].text
+            # Extract the function from the response
+            function_code = self.extract_function_from_response(universal_response)
+            
+            # Execute the feature construction code
+            construct_func = self.execute_feature_construction_code(function_code)
+            
+            if not construct_func:
+                print("❌ Failed to extract or execute universal function")
+                return False
+            
+            # Test with mock data similar to single ticker validation
+            import numpy as np
+            np.random.seed(42)  # For reproducible testing
+            test_input = np.random.rand(4, 97).astype(np.float32)  # Sample input with expected shape (lookback_window, features)
+            
+            try:
+                test_result = construct_func(test_input)
+                
+                # Validate output format
+                if not isinstance(test_result, np.ndarray):
+                    print(f"❌ Universal function returned non-array: {type(test_result)}")
+                    return False
+                
+                if test_result.ndim != 2:
+                    print(f"❌ Universal function returned wrong dimensions: {test_result.ndim}D, expected 2D")
+                    return False
+                
+                if test_result.shape[0] != test_input.shape[0]:
+                    print(f"❌ Universal function returned wrong number of rows: {test_result.shape[0]}, expected {test_input.shape[0]}")
+                    return False
+                
+                # Check for NaN or infinite values
+                if np.any(np.isnan(test_result)) or np.any(np.isinf(test_result)):
+                    print("❌ Universal function returned NaN or infinite values")
+                    return False
+                
+                print(f"✅ Universal function validation passed! Output shape: {test_result.shape}")
+                return True
+                
+            except Exception as test_error:
+                print(f"❌ Universal function execution failed: {test_error}")
+                return False
+                
         except Exception as e:
-            print(f"Error calling Claude API for universal code: {e}")
-            return None
+            print(f"❌ Universal code validation failed: {e}")
+            return False
+    
+    def _create_validation_error_feedback(self, validation_errors: List[Dict[str, Any]]) -> str:
+        """Create error feedback message for Claude based on validation failures."""
+        error_summary = "VALIDATION ERROR FEEDBACK:\n"
+        error_summary += "The previous universal code failed validation. Here are the issues:\n\n"
+        
+        for i, error in enumerate(validation_errors, 1):
+            error_summary += f"Attempt {error['attempt']} Error:\n"
+            error_summary += f"- Type: {error['error_type']}\n"
+            error_summary += f"- Message: {error['error_message']}\n"
+            error_summary += f"- Code snippet: {error['code_snippet']}\n\n"
+        
+        error_summary += """
+Please fix the issues in your universal feature engineering function:
+
+The function must be production-ready and handle the mock data validation successfully.
+"""
+        return error_summary
