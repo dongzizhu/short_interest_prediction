@@ -7,196 +7,11 @@ This system implements an advanced **iterative agent-based feature selection** a
 
 ## 🏗️ System Architecture
 
-### Core Components & Data Flow
-
-The system follows a **layered modular architecture** with clear separation of concerns:
-
+### Single Ticker Process:
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                     Configuration Layer (config.py)                   │
-│  DataConfig │ ModelConfig │ LLMConfig │ EvaluationConfig │ SystemConfig│
-└──────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│              Orchestration Layer (main.py)                           │
-│           IterativeFeatureSelectionPipeline                          │
-│  - run_iterative_process_for_ticker()                               │
-│  - run_multi_ticker_process()                                       │
-└──────────────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│ Data Layer   │    │  Prompt Layer    │    │ Evaluation Layer │
-│(data_loader) │    │   (prompt.py)    │    │  (evaluation.py) │
-└──────────────┘    └──────────────────┘    └──────────────────┘
-         │                    │                         │
-         │                    ▼                         │
-         │         ┌──────────────────────┐             │
-         │         │ Feature Engineering  │             │
-         │         │(feature_engineering) │             │
-         │         │  - IterativeLLM...   │             │
-         │         │  - UniversalFE...    │             │
-         │         └──────────────────────┘             │
-         │                    │                         │
-         └──────────┬─────────┘                         │
-                    ▼                                   │
-         ┌──────────────────────┐                      │
-         │    Model Layer       │                      │
-         │     (models.py)      │                      │
-         │  - ModelTrainer      │                      │
-         │  - LSTM / SVM        │                      │
-         └──────────────────────┘                      │
-                    │                                   │
-                    └───────────────────────────────────┘
-                                    │
-                                    ▼
-                         ┌──────────────────┐
-                         │  Results/Cache   │
-                         │  - PKL files     │
-                         │  - Reports       │
-                         │  - Generated Code│
-                         └──────────────────┘
-
-         ┌──────────────────────────────────────────┐
-         │        Utility Layer (utils.py)          │
-         │ Supporting all layers with helpers       │
-         └──────────────────────────────────────────┘
-```
-
-### Layer Responsibilities
-
-#### 1. **Configuration Layer** (`config.py`)
-- **Purpose**: Centralized configuration management
-- **Classes**:
-  - `DataConfig`: Data paths, splits, lookback windows
-  - `ModelConfig`: Model architecture (LSTM/SVM), hyperparameters
-  - `LLMConfig`: Claude API settings, iteration limits
-  - `EvaluationConfig`: Output paths, reporting options
-  - `SystemConfig`: Logging, multiprocessing
-- **Presets**: Development, Production, Quick Test configurations
-
-#### 2. **Orchestration Layer** (`main.py`)
-- **Purpose**: Coordinates entire workflow
-- **Main Class**: `IterativeFeatureSelectionPipeline`
-- **Key Methods**:
-  - `run_iterative_process_for_ticker()`: Single ticker iteration loop
-  - `run_multi_ticker_process()`: Multi-ticker with universal code generation
-  - `_save_ticker_results()`: Persist results to cache
-- **Responsibilities**:
-  - Initialize all components
-  - Manage iteration loops
-  - Handle errors and retries
-  - Coordinate baseline → iterations → final test flow
-
-#### 3. **Data Layer** (`data_loader.py`)
-- **Purpose**: Load and preprocess financial data
-- **Main Class**: `DataLoader`
-- **Key Methods**:
-  - `load_data_for_ticker()`: Load all data sources for a ticker
-  - `load_ticker_timeseries()`: Load SI & volume from cache
-  - `load_extra_features()`: Load options & shares data
-  - `create_price_features_from_parquet()`: Extract OHLC with lag structure
-  - `create_short_volume_features()`: Process short volume data
-  - `_make_windows_level_to_logret()`: Create supervised learning windows
-  - `_split_data()`: Train/Val/Test split (60/20/20)
-- **Data Sources**:
-  - Price data (parquet): OHLC prices
-  - Ticker timeseries (pkl): Short interest & volume
-  - Extra features (parquet): Options data, shares outstanding
-  - Short volume (parquet): Daily short/total volume
-
-#### 4. **Prompt Layer** (`prompt.py`)
-- **Purpose**: Generate prompts for Claude API
-- **Functions**:
-  - `create_iterative_prompt_template()`: Context-aware iterative prompts
-  - `create_universal_prompt_template()`: Multi-ticker synthesis prompts
-- **Prompt Components**:
-  - Performance history with metrics
-  - Feature importance analysis
-  - Error feedback from previous attempts
-  - Previous iteration code
-  - Domain knowledge & constraints
-  - Implementation rules
-
-#### 5. **Feature Engineering Layer** (`feature_engineering.py`)
-- **Purpose**: LLM-driven feature engineering
-- **Classes**:
-
-  **A. `IterativeLLMFeatureSelector`**:
-  - `call_claude_for_iterative_improvement()`: Call Claude with context
-  - `extract_function_from_response()`: Parse generated code
-  - `execute_feature_construction_code()`: Validate & compile code
-  - `apply_feature_selection_to_data()`: Apply to dataset with retry
-  - `fallback_construct_features()`: Fallback if all retries fail
-
-  **B. `UniversalFeatureEngineering`**:
-  - `call_claude_for_universal_code()`: Synthesize multi-ticker features
-  - `_validate_universal_code()`: Test with mock data
-  - `_create_validation_error_feedback()`: Error feedback loop
-
-#### 6. **Model Layer** (`models.py`)
-- **Purpose**: Model architectures and training
-- **Classes**:
-
-  **A. `EnhancedLSTMTimeSeries` (PyTorch)**:
-  - Multi-layer LSTM with dropout
-  - Dense layers for prediction
-  - Handles 3D time series input
-
-  **B. `SVMModel`**:
-  - Support Vector Regression (sklearn)
-  - Flattens 3D to 2D for SVM
-  - Feature scaling with StandardScaler
-  - Permutation-based feature importance
-
-  **C. `ModelTrainer`**:
-  - `train_and_evaluate_model()`: Unified training interface
-  - `_train_lstm_model()`: LSTM-specific training
-  - `_train_svm_model()`: SVM-specific training
-  - `_calculate_permutation_importance()`: Feature importance
-  - `_calculate_gradient_importance()`: Gradient-based importance (LSTM)
-
-  **D. `ModelEvaluator`**:
-  - `calculate_metrics()`: MAE, RMSE, MAPE
-  - `calculate_feature_importance_summary()`: Aggregate statistics
-  - `create_performance_summary()`: Multi-result summaries
-
-#### 7. **Evaluation Layer** (`evaluation.py`)
-- **Purpose**: Performance evaluation and reporting
-- **Classes**:
-
-  **A. `PerformanceEvaluator`**:
-  - `evaluate_iteration_results()`: Summarize iterations
-  - `compare_baseline_vs_enhanced()`: Performance comparison
-
-  **B. `ReportGenerator`**:
-  - `generate_iteration_summary()`: Ticker-specific reports
-  - `generate_performance_report()`: Universal validation reports
-  - `_save_detailed_report()`: Formatted text reports
-
-  **C. `ValidationTester`**:
-  - `test_universal_feature_engineering()`: Multi-ticker validation
-  - Tests universal code on all available tickers
-  - Compares baseline vs enhanced performance
-
-#### 8. **Utility Layer** (`utils.py`)
-- **Purpose**: Supporting functions across all layers
-- **Functions**:
-  - Data validation: `validate_data_shape()`, `validate_feature_engineering_output()`
-  - Calculations: `safe_divide()`, `calculate_returns()`, `calculate_volatility()`
-  - File I/O: `save_results()`, `load_results()`
-  - Logging: `setup_logging()`
-  - Progress tracking: `ProgressTracker` class
-  - Config validation: `validate_config()`
-
-### Complete Workflow
-
-#### Single Ticker Process:
-```
-1. Config → 2. DataLoader → 3. Baseline Training → 4. Iteration Loop ──┐
-                                                                          │
-    ┌─────────────────────────────────────────────────────────────────┘
+1. Config → 2. DataLoader → 3. Baseline Training → 4. Iteration Loop────┐
+                                                                        │
+    ┌───────────────────────────────────────────────────────────────────┘
     │
     ▼
 5. Prompt Generation → 6. Claude API Call → 7. Code Extraction → 8. Validation
@@ -212,7 +27,7 @@ The system follows a **layered modular architecture** with clear separation of c
 12. Final Test Evaluation → 13. Save Results
 ```
 
-#### Multi-Ticker Process:
+### Multi-Ticker Process:
 ```
 1. Run Single Ticker Process for each ticker (e.g., 5 tickers)
     │
@@ -230,19 +45,8 @@ The system follows a **layered modular architecture** with clear separation of c
     │
     ▼
 6. Generate Comprehensive Performance Report
-    │
-    ▼
-7. Save Universal Code & Validation Results
 ```
 
-### Key Design Patterns
-
-1. **Dependency Injection**: Configuration injected into all components
-2. **Retry Pattern**: Feature engineering has configurable retry mechanism
-3. **Template Method**: Common training interface for LSTM & SVM
-4. **Strategy Pattern**: Swappable feature importance methods (permutation/gradient)
-5. **Factory Pattern**: Config presets (development/production/quick_test)
-6. **Observer Pattern**: Progress tracking and logging throughout
 
 ## 📊 Data Structure
 
